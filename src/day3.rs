@@ -14,6 +14,7 @@ impl ContainsAny for String {
 #[derive(Debug)]
 struct PotentialPartNumber<'a> {
     number: i32,
+    line_number: i32,
     current_line: &'a str,
     start_index_in_line: i32,
     end_index_in_line: i32,
@@ -35,9 +36,9 @@ impl PotentialPartNumber<'_> {
         };
 
         let touches_end = match self.end_index_in_line {
-            x if x == self.current_line.len() as i32 => false,
+            x if x == self.current_line.len() as i32 - 1 => false,
             _ => String::from_utf8(
-                [self.current_line.as_bytes()[self.end_index_in_line as usize]].to_vec(),
+                [self.current_line.as_bytes()[self.end_index_in_line as usize + 1]].to_vec(),
             )
             .unwrap()
             .contains_any(&symbols),
@@ -65,7 +66,7 @@ impl PotentialPartNumber<'_> {
                 let substring_above: String = {
                     line.chars()
                         .skip(start_index as usize)
-                        .take(end_index as usize - start_index as usize)
+                        .take(end_index as usize - start_index as usize + 1)
                         .collect::<String>()
                 };
 
@@ -95,7 +96,7 @@ impl PotentialPartNumber<'_> {
                 let substring_below: String = {
                     line.chars()
                         .skip(start_index as usize)
-                        .take(end_index as usize - start_index as usize)
+                        .take(end_index as usize - start_index as usize + 1)
                         .collect::<String>()
                 };
 
@@ -117,10 +118,164 @@ impl PotentialPartNumber<'_> {
 
         return touches_start || touches_end || touches_above || touches_below;
     }
+
+    fn get_touching_gears(&self) -> Vec<Gear> {
+        let mut gears: Vec<Gear> = vec![];
+
+        match self.start_index_in_line {
+            0 => (),
+            start_index => {
+                let symbol = String::from_utf8(
+                    [self.current_line.as_bytes()[start_index as usize - 1]].to_vec(),
+                );
+                if symbol.eq(&Ok("*".to_string())) {
+                    gears.push(Gear {
+                        line_number: self.line_number,
+                        index_in_line: start_index - 1,
+                        adjacent_part_numbers: vec![self],
+                    });
+                }
+            }
+        };
+
+        match self.end_index_in_line {
+            end_index if end_index == self.current_line.len() as i32 - 1 => (),
+            end_index => {
+                let symbol = String::from_utf8(
+                    [self.current_line.as_bytes()[end_index as usize + 1]].to_vec(),
+                );
+                if symbol.eq(&Ok("*".to_string())) {
+                    gears.push(Gear {
+                        line_number: self.line_number,
+                        index_in_line: end_index + 1,
+                        adjacent_part_numbers: vec![self],
+                    });
+                }
+            }
+        };
+
+        match self.line_above {
+            None => (),
+            Some(line) => {
+                let start_index: i32 = {
+                    if self.start_index_in_line == 0 {
+                        0
+                    } else {
+                        self.start_index_in_line - 1
+                    }
+                };
+
+                let end_index: i32 = {
+                    if self.end_index_in_line == self.current_line.len() as i32 - 1 {
+                        self.end_index_in_line
+                    } else {
+                        self.end_index_in_line + 1
+                    }
+                };
+
+                let substring_above: String = {
+                    line.chars()
+                        .skip(start_index as usize)
+                        .take(end_index as usize - start_index as usize + 1)
+                        .collect::<String>()
+                };
+
+                for (index_in_substring, char) in substring_above.chars().enumerate() {
+                    if char == '*' {
+                        let to_subtract = match self.start_index_in_line {
+                            0 => 0,
+                            _ => 1,
+                        };
+
+                        gears.push(Gear {
+                            line_number: self.line_number - 1,
+                            index_in_line: self.start_index_in_line + index_in_substring as i32
+                                - to_subtract,
+                            adjacent_part_numbers: vec![self],
+                        });
+                    }
+                }
+            }
+        };
+
+        match self.line_below {
+            None => (),
+            Some(line) => {
+                let start_index: i32 = {
+                    if self.start_index_in_line == 0 {
+                        0
+                    } else {
+                        self.start_index_in_line - 1
+                    }
+                };
+
+                let end_index: i32 = {
+                    if self.end_index_in_line == self.current_line.len() as i32 - 1 {
+                        self.end_index_in_line
+                    } else {
+                        self.end_index_in_line + 1
+                    }
+                };
+
+                let substring_below: String = {
+                    line.chars()
+                        .skip(start_index as usize)
+                        .take(end_index as usize - start_index as usize + 1)
+                        .collect::<String>()
+                };
+
+                for (index_in_substring, char) in substring_below.chars().enumerate() {
+                    if char == '*' {
+                        let to_subtract = match self.start_index_in_line {
+                            0 => 0,
+                            _ => 1,
+                        };
+
+                        gears.push(Gear {
+                            line_number: self.line_number + 1,
+                            index_in_line: self.start_index_in_line + index_in_substring as i32
+                                - to_subtract,
+                            adjacent_part_numbers: vec![self],
+                        });
+                    }
+                }
+            }
+        };
+
+        gears
+    }
 }
+
+#[derive(Debug)]
+struct Gear<'a> {
+    line_number: i32,
+    index_in_line: i32,
+    adjacent_part_numbers: Vec<&'a PotentialPartNumber<'a>>,
+}
+
+impl Gear<'_> {
+    fn is_adjacent_to_exactly_two_part_number(&self) -> bool {
+        self.adjacent_part_numbers.len() == 2
+    }
+
+    fn get_ratio(&self) -> i32 {
+        self.adjacent_part_numbers
+            .iter()
+            .fold(1, |acc, cur| acc * cur.number)
+    }
+}
+
+impl PartialEq for Gear<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.line_number == other.line_number && self.index_in_line == other.index_in_line
+    }
+}
+
+impl Eq for Gear<'_> {}
 
 fn main() {
     part1();
+    part2();
 }
 
 fn part1() {
@@ -130,6 +285,42 @@ fn part1() {
         .fold(0, |acc, num| acc + num.number);
 
     println!("The sum of the numbers that touch a symbol is: {}", total);
+}
+
+fn part2() {
+    let parsed_input: Vec<PotentialPartNumber> = parse(input());
+
+    let all_gears: Vec<Gear> = parsed_input
+        .iter()
+        .flat_map(|no| no.get_touching_gears())
+        .collect();
+
+    let mut normalized_gears: Vec<Gear> = vec![];
+
+    let _ = all_gears.iter().for_each(|gear| {
+        match normalized_gears
+            .iter_mut()
+            .find(|norm_gear| norm_gear.eq(&gear))
+        {
+            Some(found_gear) => gear
+                .adjacent_part_numbers
+                .iter()
+                .for_each(|part_nr| found_gear.adjacent_part_numbers.push(part_nr)),
+            None => normalized_gears.push(Gear {
+                line_number: gear.line_number,
+                index_in_line: gear.index_in_line,
+                adjacent_part_numbers: gear.adjacent_part_numbers.clone(),
+            }),
+        }
+    });
+
+    let total_gear_ratio: i32 = normalized_gears
+        .iter()
+        .filter(|gear| gear.is_adjacent_to_exactly_two_part_number())
+        .map(|gear| gear.get_ratio())
+        .sum();
+
+    println!("The sum of gear ratios is: {}", total_gear_ratio);
 }
 
 fn parse(input: Vec<&'static str>) -> Vec<PotentialPartNumber> {
@@ -143,9 +334,10 @@ fn parse(input: Vec<&'static str>) -> Vec<PotentialPartNumber> {
 
             vec.push(PotentialPartNumber {
                 number: number.parse().unwrap(),
+                line_number: i as i32 + 1,
                 current_line: line,
                 start_index_in_line: m.start() as i32,
-                end_index_in_line: m.end() as i32,
+                end_index_in_line: m.end() as i32 - 1,
                 line_above: match i {
                     0 => None,
                     _ => Some(input.get(i - 1).copied().unwrap()),
