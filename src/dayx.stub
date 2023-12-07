@@ -1,0 +1,22 @@
+fn main() {
+    part1();
+    part2();
+}
+
+fn part1() {
+    todo!();
+}
+
+fn part2() {
+    todo!();
+}
+
+#[allow(dead_code)]
+fn test_input() -> &'static str {
+    ""
+}
+
+#[allow(dead_code)]
+fn input() -> &'static str {
+    ""
+}
