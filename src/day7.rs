@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use regex::Regex;
 
 #[derive(PartialEq, Eq, Ord, Clone, Debug)]
-enum HandType {
+enum CamelCardsHandType {
     FiveOfAKind,
     FourOfAKind,
     FullHouse,
@@ -13,7 +13,7 @@ enum HandType {
     HighCard,
 }
 
-impl PartialOrd for HandType {
+impl PartialOrd for CamelCardsHandType {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         let own_rank = match self {
             Self::FiveOfAKind => 6,
@@ -40,14 +40,30 @@ impl PartialOrd for HandType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord)]
-struct Hand<'a> {
+struct CamelCardsHand<'a> {
     cards: &'a str,
     bid: i32,
-    hand_type: HandType,
+    hand_type: CamelCardsHandType,
     rank: Option<i32>,
 }
 
-impl Hand<'_> {
+#[derive(Debug, Clone, PartialEq, Eq, Ord)]
+struct CamelCardsJokerHand<'a> {
+    cards: &'a str,
+    bid: i32,
+    hand_type: CamelCardsHandType,
+    rank: Option<i32>,
+}
+
+impl CamelCardsHand<'_> {
+    fn winnings(&self) -> Option<i32> {
+        match self.rank {
+            Some(rank) => Some(rank * &self.bid),
+            None => None,
+        }
+    }
+}
+impl CamelCardsJokerHand<'_> {
     fn winnings(&self) -> Option<i32> {
         match self.rank {
             Some(rank) => Some(rank * &self.bid),
@@ -56,53 +72,66 @@ impl Hand<'_> {
     }
 }
 
-fn parse_hand_type(raw_cards: &str) -> HandType {
-    if raw_cards
-        .chars()
-        .all(|ch| ch == raw_cards.chars().nth(0).unwrap())
-    {
-        return HandType::FiveOfAKind;
+impl PartialOrd for CamelCardsJokerHand<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        if self.cards == other.cards {
+            return Some(Ordering::Equal);
+        }
+
+        let cmp = self.hand_type.partial_cmp(&other.hand_type);
+
+        match cmp {
+            Some(Ordering::Equal) => {
+                for i in 0..5 {
+                    let own_rank: Option<usize> = match self.cards.chars().nth(i) {
+                        Some('A') => Some(12),
+                        Some('K') => Some(11),
+                        Some('Q') => Some(10),
+                        Some('T') => Some(9),
+                        Some('9') => Some(8),
+                        Some('8') => Some(7),
+                        Some('7') => Some(6),
+                        Some('6') => Some(5),
+                        Some('5') => Some(4),
+                        Some('4') => Some(3),
+                        Some('3') => Some(2),
+                        Some('2') => Some(1),
+                        Some('J') => Some(0),
+                        _ => None,
+                    };
+
+                    let other_rank: Option<usize> = match other.cards.chars().nth(i) {
+                        Some('A') => Some(12),
+                        Some('K') => Some(11),
+                        Some('Q') => Some(10),
+                        Some('T') => Some(9),
+                        Some('9') => Some(8),
+                        Some('8') => Some(7),
+                        Some('7') => Some(6),
+                        Some('6') => Some(5),
+                        Some('5') => Some(4),
+                        Some('4') => Some(3),
+                        Some('3') => Some(2),
+                        Some('2') => Some(1),
+                        Some('J') => Some(0),
+                        _ => None,
+                    };
+
+                    let char_cmp = own_rank.partial_cmp(&other_rank);
+
+                    if char_cmp.unwrap() != Ordering::Equal {
+                        return char_cmp;
+                    }
+                }
+
+                None
+            }
+            passthrough => passthrough,
+        }
     }
-
-    let mut cards: Vec<char> = raw_cards.chars().collect();
-
-    cards.sort();
-
-    if (cards[0] == cards[1] && cards[0] == cards[2] && cards[0] == cards[3])
-        || (cards[1] == cards[2] && cards[1] == cards[3] && cards[1] == cards[4])
-    {
-        return HandType::FourOfAKind;
-    }
-
-    if (cards[0] == cards[1] && cards[0] == cards[2] && cards[3] == cards[4])
-        || cards[2] == cards[3] && cards[2] == cards[4] && cards[0] == cards[1]
-    {
-        return HandType::FullHouse;
-    }
-
-    if (cards[0] == cards[1] && cards[0] == cards[2])
-        || (cards[1] == cards[2] && cards[1] == cards[3])
-        || (cards[2] == cards[3] && cards[2] == cards[4])
-    {
-        return HandType::ThreeOfAKind;
-    }
-
-    if (cards[0] == cards[1] && cards[2] == cards[3])
-        || (cards[0] == cards[1] && cards[3] == cards[4])
-        || (cards[1] == cards[2] && cards[3] == cards[4])
-    {
-        return HandType::TwoPair;
-    }
-
-    if cards[0] == cards[1] || cards[1] == cards[2] || cards[2] == cards[3] || cards[3] == cards[4]
-    {
-        return HandType::OnePair;
-    }
-
-    HandType::HighCard
 }
 
-impl PartialOrd for Hand<'_> {
+impl PartialOrd for CamelCardsHand<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         if self.cards == other.cards {
             return Some(Ordering::Equal);
@@ -161,7 +190,53 @@ impl PartialOrd for Hand<'_> {
     }
 }
 
-fn rank_hands<'a>(hands: &mut Vec<Hand<'a>>) -> Vec<Hand<'a>> {
+fn parse_hand_type(raw_cards: &str) -> CamelCardsHandType {
+    if raw_cards
+        .chars()
+        .all(|ch| ch == raw_cards.chars().nth(0).unwrap())
+    {
+        return CamelCardsHandType::FiveOfAKind;
+    }
+
+    let mut cards: Vec<char> = raw_cards.chars().collect();
+
+    cards.sort();
+
+    if (cards[0] == cards[1] && cards[0] == cards[2] && cards[0] == cards[3])
+        || (cards[1] == cards[2] && cards[1] == cards[3] && cards[1] == cards[4])
+    {
+        return CamelCardsHandType::FourOfAKind;
+    }
+
+    if (cards[0] == cards[1] && cards[0] == cards[2] && cards[3] == cards[4])
+        || cards[2] == cards[3] && cards[2] == cards[4] && cards[0] == cards[1]
+    {
+        return CamelCardsHandType::FullHouse;
+    }
+
+    if (cards[0] == cards[1] && cards[0] == cards[2])
+        || (cards[1] == cards[2] && cards[1] == cards[3])
+        || (cards[2] == cards[3] && cards[2] == cards[4])
+    {
+        return CamelCardsHandType::ThreeOfAKind;
+    }
+
+    if (cards[0] == cards[1] && cards[2] == cards[3])
+        || (cards[0] == cards[1] && cards[3] == cards[4])
+        || (cards[1] == cards[2] && cards[3] == cards[4])
+    {
+        return CamelCardsHandType::TwoPair;
+    }
+
+    if cards[0] == cards[1] || cards[1] == cards[2] || cards[2] == cards[3] || cards[3] == cards[4]
+    {
+        return CamelCardsHandType::OnePair;
+    }
+
+    CamelCardsHandType::HighCard
+}
+
+fn rank_hands<'a>(hands: &mut Vec<CamelCardsHand<'a>>) -> Vec<CamelCardsHand<'a>> {
     hands.sort();
 
     for (i, hand) in hands.iter_mut().enumerate() {
@@ -188,9 +263,35 @@ fn part1() {
     println!("The total winings of every hand in the set is: {winnings}");
 }
 
-fn part2() {}
+fn part2() {
+    let mut hands = parse_hands_using_jokers(input());
 
-fn parse_hands(input: &'static str) -> Vec<Hand<'_>> {
+    hands.sort();
+
+    for (i, hand) in hands.iter_mut().enumerate() {
+        hand.rank = Some(i as i32 + 1)
+    }
+
+    for hand in &hands {
+        println!(
+            "Hand '{}', rank {}. Originally '{:?}', using jokers '{:?}'",
+            &hand.cards,
+            &hand.rank.unwrap(),
+            parse_hand_type(&hand.cards),
+            &hand.hand_type
+        );
+    }
+
+    let winnings = hands
+        .iter()
+        .fold(0, |acc, hand| acc + hand.winnings().unwrap());
+
+    println!(
+        "The total winings of every hand in the set, taking jokers into account, is: {winnings}"
+    );
+}
+
+fn parse_hands(input: &'static str) -> Vec<CamelCardsHand<'_>> {
     let re = Regex::new(r"(\w+) (\d+)").unwrap();
 
     input
@@ -198,7 +299,7 @@ fn parse_hands(input: &'static str) -> Vec<Hand<'_>> {
         .map(|raw_hand| {
             let (_, [cards, bid]) = re.captures(raw_hand).unwrap().extract();
 
-            Hand {
+            CamelCardsHand {
                 cards,
                 bid: bid.parse().unwrap(),
                 hand_type: parse_hand_type(cards),
@@ -206,6 +307,54 @@ fn parse_hands(input: &'static str) -> Vec<Hand<'_>> {
             }
         })
         .collect()
+}
+
+fn parse_hands_using_jokers(input: &'static str) -> Vec<CamelCardsJokerHand<'_>> {
+    let re = Regex::new(r"(\w+) (\d+)").unwrap();
+
+    input
+        .split('\n')
+        .map(|raw_hand| {
+            let (_, [cards, bid]) = re.captures(raw_hand).unwrap().extract();
+
+            let hand_type = permutate_joker(&cards, 0)
+                .iter()
+                .map(|c| parse_hand_type(c))
+                .max_by(|a, b| a.partial_cmp(b).unwrap())
+                .unwrap();
+
+            CamelCardsJokerHand {
+                cards,
+                bid: bid.parse().unwrap(),
+                hand_type,
+                rank: None,
+            }
+        })
+        .collect()
+}
+
+fn permutate_joker(cards: &str, index: usize) -> Vec<String> {
+    let card_types = ['A', 'K', 'Q', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
+    let mut permutations: Vec<String> = vec![];
+
+    if index >= cards.len() {
+        return vec![cards.to_owned()];
+    }
+
+    if cards.chars().nth(index).unwrap() != 'J' {
+        let inner_permutations = permutate_joker(cards, index + 1);
+        permutations.extend(inner_permutations);
+        return permutations;
+    }
+
+    for card_type in &card_types {
+        let mut cards_clone = cards.to_owned();
+        cards_clone.replace_range(index..index + 1, &card_type.to_string());
+        let inner_permutations = permutate_joker(&cards_clone, index + 1);
+        permutations.extend(inner_permutations);
+    }
+
+    permutations
 }
 
 #[allow(dead_code)]
