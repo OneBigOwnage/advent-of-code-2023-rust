@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum RelativeDirection {
     Top,
     Right,
@@ -7,10 +7,9 @@ enum RelativeDirection {
 }
 
 fn main() {
-    let answer = part1();
-    assert_eq!(6956, answer);
+    assert_eq!(6956, part1());
 
-    part2();
+    assert_eq!(455, part2());
 }
 
 fn part1() -> i32 {
@@ -38,10 +37,25 @@ fn part1() -> i32 {
             break;
         }
 
-        ((one_x, one_y), (one_last_x, one_last_y)) =
-            traverse_pipes_get_next_coord(input, (one_x, one_y), (one_last_x, one_last_y));
-        ((two_x, two_y), (two_last_x, two_last_y)) =
-            traverse_pipes_get_next_coord(input, (two_x, two_y), (two_last_x, two_last_y));
+        match traverse_pipes_get_next_coord(input, (one_x, one_y), (one_last_x, one_last_y)) {
+            (Some((new_x, new_y)), (prev_x, prev_y)) => {
+                one_x = new_x;
+                one_y = new_y;
+                one_last_x = prev_x;
+                one_last_y = prev_y;
+            }
+            _ => (),
+        };
+
+        match traverse_pipes_get_next_coord(input, (two_x, two_y), (two_last_x, two_last_y)) {
+            (Some((new_x, new_y)), (prev_x, prev_y)) => {
+                two_x = new_x;
+                two_y = new_y;
+                two_last_x = prev_x;
+                two_last_y = prev_y;
+            }
+            _ => (),
+        };
 
         steps += 1;
     }
@@ -51,8 +65,244 @@ fn part1() -> i32 {
     steps
 }
 
-fn part2() {
-    todo!()
+fn part2() -> i32 {
+    let input = input();
+
+    let coords = find_coords_of_all_pipes_in_loop(input);
+
+    let mut enclosed_tiles: Vec<(i32, i32)> = vec![];
+    // TODO: Figure out what we should use as the "inside" of the loop.
+    // Idea: Raycast both ways while traversing the loop, at some point we must
+    //       hit the canvas edge with either of the two rays. This is then the
+    //       outside. We either move the starting position to our current
+    //       position or we traverse back keeping track of the inside along the
+    //       way.
+    //
+    //       For some reason, though, we always get the right answer already,
+    //       without this being implemented, no matter which starting inside
+    //       direction we choose. Magical...
+    let mut inside_direction = RelativeDirection::Bottom;
+
+    for (mut index, (x, y)) in coords.iter().enumerate() {
+        if index + 1 >= coords.len() {
+            index = 0;
+        }
+
+        inside_direction = determine_inside(&coords, (*x, *y), &inside_direction);
+
+        let tiles_inside = find_tiles_raycast(&coords, (*x, *y), &inside_direction);
+
+        enclosed_tiles.extend(tiles_inside);
+
+        // If the next pipe changes direction, we need to do two directional ray cast.
+        // This solves the literal corner cases.
+        if determine_inside(&coords, coords[index + 1], &inside_direction) != inside_direction {
+            let tiles_inside = find_tiles_raycast(
+                &coords,
+                (*x, *y),
+                &determine_inside(&coords, coords[index + 1], &inside_direction),
+            );
+
+            enclosed_tiles.extend(tiles_inside);
+        }
+    }
+
+    // Dedup only works for consecutive items, so the list must be sorted.
+    enclosed_tiles.sort();
+    enclosed_tiles.dedup();
+
+    // Uncomment the next two lines to show the output in the terminal.
+    // let output = mark_coords_on_input(input, &coords, &enclosed_tiles);
+    // println!("{}", output);
+
+    println!(
+        "There are exactly {} tiles enclosed by the loop of pipes",
+        enclosed_tiles.len()
+    );
+
+    enclosed_tiles.len() as i32
+}
+
+#[allow(dead_code)]
+fn mark_coords_on_input<'a>(
+    input: &'static str,
+    pipes: &Vec<(i32, i32)>,
+    enclosed_tiles: &Vec<(i32, i32)>,
+) -> String {
+    let mut output = "".to_owned();
+
+    for (y, line) in input.lines().enumerate() {
+        for (x, ch) in line.chars().enumerate() {
+            if pipes.contains(&(x as i32, y as i32)) {
+                output += match ch {
+                    'L' => "└",
+                    'J' => "┘",
+                    '7' => "┐",
+                    'F' => "┌",
+                    '|' => "│",
+                    '-' => "─",
+                    _ => "S",
+                };
+            } else if enclosed_tiles.contains(&(x as i32, y as i32)) {
+                output += &"I";
+            } else {
+                output += " ";
+            }
+        }
+
+        output += "\n";
+    }
+
+    output
+}
+
+fn determine_inside(
+    all_pipes: &Vec<(i32, i32)>,
+    (currentx, currenty): (i32, i32),
+    last_inside: &RelativeDirection,
+) -> RelativeDirection {
+    let (i, _) = all_pipes
+        .iter()
+        .enumerate()
+        .find(|(_, coord)| **coord == (currentx, currenty))
+        .unwrap();
+    let prev_i = match i {
+        0 => all_pipes.len() - 1,
+        index => index - 1,
+    };
+
+    let relative_direction = get_relative_direction(all_pipes[prev_i], all_pipes[i]).unwrap();
+
+    let inside = match (last_inside, &relative_direction) {
+        (RelativeDirection::Left, RelativeDirection::Bottom) => RelativeDirection::Left,
+        (RelativeDirection::Right, RelativeDirection::Bottom) => RelativeDirection::Right,
+        (RelativeDirection::Left, RelativeDirection::Top) => RelativeDirection::Left,
+        (RelativeDirection::Right, RelativeDirection::Top) => RelativeDirection::Right,
+
+        (RelativeDirection::Bottom, RelativeDirection::Right) => RelativeDirection::Bottom,
+        (RelativeDirection::Top, RelativeDirection::Right) => RelativeDirection::Top,
+        (RelativeDirection::Bottom, RelativeDirection::Left) => RelativeDirection::Bottom,
+        (RelativeDirection::Top, RelativeDirection::Left) => RelativeDirection::Top,
+
+        (RelativeDirection::Bottom, RelativeDirection::Bottom) => RelativeDirection::Right,
+        (RelativeDirection::Top, RelativeDirection::Bottom) => RelativeDirection::Right, // Checked
+        (RelativeDirection::Bottom, RelativeDirection::Top) => RelativeDirection::Left,
+        (RelativeDirection::Top, RelativeDirection::Top) => RelativeDirection::Left,
+
+        (RelativeDirection::Right, RelativeDirection::Right) => RelativeDirection::Top,
+        (RelativeDirection::Left, RelativeDirection::Right) => RelativeDirection::Top, // Checked
+        (RelativeDirection::Right, RelativeDirection::Left) => RelativeDirection::Bottom,
+        (RelativeDirection::Left, RelativeDirection::Left) => RelativeDirection::Bottom,
+    };
+
+    inside
+}
+
+fn find_tiles_raycast(
+    all_pipes: &Vec<(i32, i32)>,
+    (origin_x, origin_y): (i32, i32),
+    direction: &RelativeDirection,
+) -> Vec<(i32, i32)> {
+    let max_x = all_pipes
+        .iter()
+        .reduce(|max, cur| match cur.0 > max.0 {
+            true => cur,
+            false => max,
+        })
+        .unwrap()
+        .0;
+
+    let max_y = all_pipes
+        .iter()
+        .reduce(|max, cur| match cur.1 > max.1 {
+            true => cur,
+            false => max,
+        })
+        .unwrap()
+        .1;
+
+    let mut enclosed_tiles = vec![];
+
+    match direction {
+        RelativeDirection::Top => {
+            for y in (0..origin_y).rev() {
+                let tile = (origin_x, y);
+
+                if all_pipes.contains(&tile) {
+                    break;
+                } else {
+                    enclosed_tiles.push(tile);
+                }
+            }
+        }
+        RelativeDirection::Bottom => {
+            for y in origin_y + 1..max_y {
+                let tile = (origin_x, y);
+
+                if all_pipes.contains(&tile) {
+                    break;
+                } else {
+                    enclosed_tiles.push(tile);
+                }
+            }
+        }
+        RelativeDirection::Right => {
+            for x in origin_x + 1..max_x {
+                let tile = (x, origin_y);
+
+                if all_pipes.contains(&tile) {
+                    break;
+                } else {
+                    enclosed_tiles.push(tile);
+                }
+            }
+        }
+        RelativeDirection::Left => {
+            for x in (0..origin_x).rev() {
+                let tile = (x, origin_y);
+
+                if all_pipes.contains(&tile) {
+                    break;
+                } else {
+                    enclosed_tiles.push(tile);
+                }
+            }
+        }
+    }
+
+    enclosed_tiles
+}
+
+fn find_coords_of_all_pipes_in_loop(input: &'static str) -> Vec<(i32, i32)> {
+    let (start_x, start_y) = find_starting_position(input).unwrap();
+
+    let connections = find_connections_to_start(input, start_x, start_y);
+
+    let mut one_x = connections[0].0;
+    let mut one_y = connections[0].1;
+
+    let mut one_last_x = start_x;
+    let mut one_last_y = start_y;
+
+    let mut pipes = vec![(start_x, start_y)];
+
+    loop {
+        pipes.push((one_x, one_y));
+
+        match traverse_pipes_get_next_coord(input, (one_x, one_y), (one_last_x, one_last_y)) {
+            (Some((new_x, new_y)), (prev_x, prev_y)) => {
+                one_x = new_x;
+                one_y = new_y;
+                one_last_x = prev_x;
+                one_last_y = prev_y;
+            }
+            _ => break,
+        };
+    }
+
+    pipes.dedup();
+
+    pipes
 }
 
 fn find_starting_position(input: &'static str) -> Option<(i32, i32)> {
@@ -189,15 +439,15 @@ fn traverse_pipes_get_next_coord(
     input: &'static str,
     (x, y): (i32, i32),
     (lastx, lasty): (i32, i32),
-) -> ((i32, i32), (i32, i32)) {
+) -> (Option<(i32, i32)>, (i32, i32)) {
     (
-        *find_connections(input, (x, y))
+        find_connections(input, (x, y))
             .iter()
             .filter(|coord| **coord != (lastx, lasty))
             .cloned()
             .collect::<Vec<(i32, i32)>>()
             .first()
-            .unwrap(),
+            .cloned(),
         (x, y),
     )
 }
@@ -208,11 +458,16 @@ fn get_surrounding_coords((x, y): (i32, i32)) -> Vec<(i32, i32)> {
 
 #[allow(dead_code)]
 fn test_input() -> &'static str {
-    "7-F7-
-.FJ|7
-SJLL7
-|F--J
-LJ.LJ"
+    "FF7FSF7F7F7F7F7F---7
+L|LJ||||||||||||F--J
+FL-7LJLJ||||||LJL-77
+F--JF--7||LJLJ7F7FJ-
+L---JF-JLJ.||-FJLJJ7
+|F|F-JF---7F7-L7L|7|
+|FFJF7L7F-JF7|JL---7
+7-L-JL7||F7|L7F-7F7|
+L.L7LFJ|||||FJL7||LJ
+L7JLJL-JLJLJL--JLJ.L"
 }
 
 #[allow(dead_code)]
