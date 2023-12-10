@@ -185,12 +185,12 @@ fn determine_inside(
         (RelativeDirection::Top, RelativeDirection::Left) => RelativeDirection::Top,
 
         (RelativeDirection::Bottom, RelativeDirection::Bottom) => RelativeDirection::Right,
-        (RelativeDirection::Top, RelativeDirection::Bottom) => RelativeDirection::Right, // Checked
+        (RelativeDirection::Top, RelativeDirection::Bottom) => RelativeDirection::Right,
         (RelativeDirection::Bottom, RelativeDirection::Top) => RelativeDirection::Left,
         (RelativeDirection::Top, RelativeDirection::Top) => RelativeDirection::Left,
 
         (RelativeDirection::Right, RelativeDirection::Right) => RelativeDirection::Top,
-        (RelativeDirection::Left, RelativeDirection::Right) => RelativeDirection::Top, // Checked
+        (RelativeDirection::Left, RelativeDirection::Right) => RelativeDirection::Top,
         (RelativeDirection::Right, RelativeDirection::Left) => RelativeDirection::Bottom,
         (RelativeDirection::Left, RelativeDirection::Left) => RelativeDirection::Bottom,
     };
