@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use rayon::prelude::*;
 
 type Point = (usize, usize);
 type Route = Vec<Point>;
@@ -12,41 +13,53 @@ struct GalaxyPair {
 }
 
 fn main() {
-    // assert_eq!(9605127, part1());
-    assert_eq!(8410, part2());
+    assert_eq!(9605127, part1());
+    assert_eq!(458191688761, part2());
 }
 
 fn part1() -> usize {
-    let universe = test_input();
+    let universe = input();
     let galaxies = find_galaxies(&universe);
-    let galaxy_pairs = make_galaxy_pairs(&galaxies);
+    let galaxy_groups = make_galaxy_groups(&galaxies);
     let expansion_rate = 2;
 
     println!(
-        "We found {} galaxies, which makes for {} unique pairs.",
+        "We found {} galaxies, which makes for {} smart pairs.",
         galaxies.len(),
-        galaxy_pairs.len()
+        galaxy_groups.len()
     );
 
     let expansion_points = get_expansion_points(&universe);
 
-    let pairs_with_shortest_paths: Vec<GalaxyPair> = galaxy_pairs
+    let pairs_with_shortest_paths: Vec<GalaxyPair> = galaxy_groups
         .iter()
-        .take(100)
-        .map(|&(origin, destination)| {
-            let (route, length) = find_shortest_path_dijkstras(
+        .flat_map(|(origin, destinations)| {
+            let routes = find_shortest_path_dijkstras(
                 &universe,
-                (origin, destination),
+                origin,
+                &destinations.iter().map(|&&foo| foo).collect(),
                 expansion_rate,
                 &expansion_points,
             );
 
-            GalaxyPair {
-                origin: *origin,
-                destination: *destination,
-                route: Some(route),
-                length: Some(length),
-            }
+            println!("Found all routes for origin {:?}", origin);
+
+            destinations
+                .iter()
+                .map(|destination| GalaxyPair {
+                    origin: **origin,
+                    destination: **destination,
+                    route: None,
+                    length: Some(
+                        routes
+                            .iter()
+                            .find(|route| route.0 == **destination)
+                            .unwrap()
+                            .1
+                             .1,
+                    ),
+                })
+                .collect::<Vec<_>>()
         })
         .collect();
 
@@ -92,18 +105,6 @@ fn find_galaxies(universe: &String) -> Vec<Point> {
     galaxies
 }
 
-fn make_galaxy_pairs(galaxy_coordinates: &Vec<Point>) -> Vec<(&Point, &Point)> {
-    let mut pairs = vec![];
-
-    for i in 0..galaxy_coordinates.len() {
-        for ii in (i + 1)..galaxy_coordinates.len() {
-            pairs.push((&galaxy_coordinates[i], &galaxy_coordinates[ii]));
-        }
-    }
-
-    pairs
-}
-
 fn make_galaxy_groups(galaxy_coordinates: &Vec<Point>) -> Vec<(&Point, Vec<&Point>)> {
     let mut groups = vec![];
 
@@ -123,12 +124,14 @@ fn make_galaxy_groups(galaxy_coordinates: &Vec<Point>) -> Vec<(&Point, Vec<&Poin
 
 fn find_shortest_path_dijkstras(
     universe: &String,
-    (origin, destination): (&Point, &Point),
+    origin: &Point,
+    destinations: &Vec<Point>,
     expansion_rate: usize,
     expansion_points: &Vec<Point>,
-) -> (Route, usize) {
+) -> Vec<(Point, (Route, usize))> {
     let mut nodes_discovered: HashMap<Point, (Vec<Point>, usize)> = HashMap::new();
     nodes_discovered.insert(*origin, (vec![*origin], 0));
+    let mut destinations_discovered: HashMap<Point, (Route, usize)> = HashMap::new();
 
     let max_x = universe
         .lines()
@@ -144,6 +147,10 @@ fn find_shortest_path_dijkstras(
     edge_nodes.insert(*origin);
 
     loop {
+        if destinations_discovered.len() == destinations.len() {
+            return destinations_discovered.into_iter().collect();
+        }
+
         let mut next_edge_nodes: HashSet<Point> = HashSet::new();
 
         for edge_node in &edge_nodes {
@@ -161,16 +168,25 @@ fn find_shortest_path_dijkstras(
 
                 next_edge_nodes.insert(new_dest);
 
+                if destinations.contains(&new_dest) {
+                    if let Some((_, stored_length)) =
+                        destinations_discovered.get(&new_dest)
+                    {
+                        if new_length < *stored_length {
+                            destinations_discovered
+                                .insert(new_dest, (new_path.clone(), new_length));
+                        }
+                    } else {
+                        destinations_discovered.insert(new_dest, (new_path.clone(), new_length));
+                    }
+                }
+
                 if let Some(node) = nodes_discovered.get(&(x, y)) {
                     if new_length < node.1 {
                         nodes_discovered.insert(new_dest, (new_path, new_length));
                     }
                 } else {
                     nodes_discovered.insert(new_dest, (new_path, new_length));
-                }
-
-                if new_dest == *destination {
-                    return nodes_discovered.get(&new_dest).unwrap().clone();
                 }
             }
         }
@@ -234,7 +250,7 @@ fn part2() -> usize {
     let expansion_rate = 1_000_000;
 
     println!(
-        "We found {} galaxies, which makes for {} unique pairs.",
+        "We found {} galaxies, which makes for {} smart pairs.",
         galaxies.len(),
         galaxy_groups.len()
     );
@@ -242,21 +258,34 @@ fn part2() -> usize {
     let expansion_points = get_expansion_points(&universe);
 
     let pairs_with_shortest_paths: Vec<GalaxyPair> = galaxy_groups
-        .iter()
-        .map(|&(origin, destination)| {
-            let (route, length) = find_shortest_path_dijkstras(
+        .par_iter()
+        .flat_map(|(origin, destinations)| {
+            let routes = find_shortest_path_dijkstras(
                 &universe,
-                (origin, destination),
+                origin,
+                &destinations.iter().map(|&&foo| foo).collect(),
                 expansion_rate,
                 &expansion_points,
             );
 
-            GalaxyPair {
-                origin: *origin,
-                destination: *destination,
-                route: Some(route),
-                length: Some(length),
-            }
+            println!("Found all routes for origin {:?}", origin);
+
+            destinations
+                .iter()
+                .map(|destination| GalaxyPair {
+                    origin: **origin,
+                    destination: **destination,
+                    route: None,
+                    length: Some(
+                        routes
+                            .iter()
+                            .find(|route| route.0 == **destination)
+                            .unwrap()
+                            .1
+                             .1,
+                    ),
+                })
+                .collect::<Vec<_>>()
         })
         .collect();
 
