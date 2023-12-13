@@ -104,6 +104,23 @@ fn make_galaxy_pairs(galaxy_coordinates: &Vec<Point>) -> Vec<(&Point, &Point)> {
     pairs
 }
 
+fn make_galaxy_groups(galaxy_coordinates: &Vec<Point>) -> Vec<(&Point, Vec<&Point>)> {
+    let mut groups = vec![];
+
+    for i in 0..galaxy_coordinates.len() {
+        let mut destinations = vec![];
+        for ii in (i + 1)..galaxy_coordinates.len() {
+            destinations.push(&galaxy_coordinates[ii]);
+        }
+
+        if destinations.len() > 0 {
+            groups.push((&galaxy_coordinates[i], destinations));
+        }
+    }
+
+    groups
+}
+
 fn find_shortest_path_dijkstras(
     universe: &String,
     (origin, destination): (&Point, &Point),
@@ -213,20 +230,19 @@ fn visualize_path_in_universe(universe: &String, path: &Route) {
 fn part2() -> usize {
     let universe = input();
     let galaxies = find_galaxies(&universe);
-    let galaxy_pairs = make_galaxy_pairs(&galaxies);
+    let galaxy_groups = make_galaxy_groups(&galaxies);
     let expansion_rate = 1_000_000;
 
     println!(
         "We found {} galaxies, which makes for {} unique pairs.",
         galaxies.len(),
-        galaxy_pairs.len()
+        galaxy_groups.len()
     );
 
     let expansion_points = get_expansion_points(&universe);
 
-    let pairs_with_shortest_paths: Vec<GalaxyPair> = galaxy_pairs
+    let pairs_with_shortest_paths: Vec<GalaxyPair> = galaxy_groups
         .iter()
-        .take(1000)
         .map(|&(origin, destination)| {
             let (route, length) = find_shortest_path_dijkstras(
                 &universe,
