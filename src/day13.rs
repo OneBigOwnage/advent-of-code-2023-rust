@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Split {
     Horizontal,
     Vertical,
@@ -12,28 +12,19 @@ enum ObjectType {
     Rocks,
 }
 
-impl Display for ObjectType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                ObjectType::Ash => ".",
-                ObjectType::Rocks => "#",
-            }
-        )
-    }
-}
-
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Pattern {
     objects: Vec<Vec<ObjectType>>,
     split: Option<Split>,
     mirrored_after: Option<usize>,
 }
 
-struct SmudgedPattern {
-    original: &Pattern,
-    potential_patterns: Vec<Pattern>,
+type Point = (usize, usize);
+
+#[derive(Debug, Clone)]
+struct SmudgedPattern<'a> {
+    original: &'a Pattern,
+    potential_patterns: Vec<(Pattern, Point)>,
 }
 
 impl Display for Pattern {
@@ -57,18 +48,19 @@ impl Display for Pattern {
 
 fn main() {
     assert_eq!(405, part1(&test_input()));
-    assert_eq!(0, part1(&input()));
+    assert_eq!(27202, part1(&input()));
     assert_eq!(400, part2(&test_input()));
-    // assert_eq!(0, part2(&input()));
+    assert_eq!(41566, part2(&input()));
 }
 
 fn part1(input: &String) -> usize {
     parse(input)
         .iter_mut()
         .map(|pattern| {
-            let (split, after) = find_mirror_line(pattern).unwrap();
-            pattern.mirrored_after = Some(after);
-            pattern.split = Some(split);
+            let binding = find_mirror_line(pattern);
+            let (split, after) = binding.first().unwrap();
+            pattern.mirrored_after = Some(*after);
+            pattern.split = Some(*split);
 
             pattern
         })
@@ -81,44 +73,94 @@ fn part1(input: &String) -> usize {
 }
 
 fn part2(input: &String) -> usize {
-    parse(input).iter().map(|pattern| {
-        let mut potential_patterns: Vec<Pattern> = vec![];
+    parse(input)
+        .iter_mut()
+        .map(|pattern| {
+            let binding = find_mirror_line(pattern);
+            let (split, after) = binding.first().unwrap();
+            pattern.mirrored_after = Some(*after);
+            pattern.split = Some(*split);
 
-        for i in 0..pattern.objects.len() {
-            for ii in 0..pattern.objects[0].len() {
-                let mut potential = pattern.objects.to_vec();
-                potential[i][ii] = match potential[i][ii] {
-                    ObjectType::Ash => ObjectType::Rocks,
-                    ObjectType::Rocks => ObjectType::Ash,
-                };
+            let mut potential_patterns: Vec<(Pattern, Point)> = vec![];
 
-                potential_patterns.push(potential);
+            for i in 0..pattern.objects.len() {
+                for ii in 0..pattern.objects[0].len() {
+                    let mut potential = pattern.clone();
+
+                    potential.objects[i][ii] = match potential.objects[i][ii] {
+                        ObjectType::Ash => ObjectType::Rocks,
+                        ObjectType::Rocks => ObjectType::Ash,
+                    };
+
+                    potential_patterns.push((potential, (ii, i)));
+                }
             }
-        }
 
-        SmudgedPattern {
-            original: pattern,
-            potential_patterns,
-        }
-    });
-    0
+            let all_smudged = SmudgedPattern {
+                original: pattern,
+                potential_patterns: potential_patterns.clone(),
+            };
+
+            let mut valid_smudged = SmudgedPattern {
+                original: pattern,
+                potential_patterns: vec![],
+            };
+
+            for potential in &all_smudged.potential_patterns {
+                for result in find_mirror_line(&potential.0) {
+                    if result.0 == all_smudged.original.split.unwrap()
+                        && result.1 == all_smudged.original.mirrored_after.unwrap()
+                    {
+                        continue;
+                    }
+
+                    valid_smudged.potential_patterns.push((
+                        Pattern {
+                            objects: potential.0.objects.clone(),
+                            split: Some(result.0),
+                            mirrored_after: Some(result.1),
+                        },
+                        potential.1,
+                    ));
+                }
+            }
+
+            valid_smudged
+        })
+        .map(|smudged| {
+            if let Some(valid) = &smudged.potential_patterns.first() {
+                match valid.0.split {
+                    Some(Split::Vertical) => valid.0.mirrored_after.unwrap() + 1,
+                    Some(Split::Horizontal) => (valid.0.mirrored_after.unwrap() + 1) * 100,
+                    _ => panic!("The split should have been set"),
+                }
+            } else {
+                panic!("We couldn't find any smudges that result in a new and valid mirror line!");
+            }
+        })
+        .sum()
 }
 
-fn find_mirror_line(pattern: &Pattern) -> Option<(Split, usize)> {
-    if let Some(result) = find_horizontal_mirror_line(&pattern) {
-        return Some(result);
-    }
+fn find_mirror_line(pattern: &Pattern) -> Vec<(Split, usize)> {
+    let mut mirror_lines = vec![];
+
+    mirror_lines.extend(find_horizontal_mirror_lines(&pattern));
 
     let rotated = rotate_objects_clockwise(&pattern);
 
-    if let Some((_, after)) = find_horizontal_mirror_line(&rotated) {
-        return Some((Split::Vertical, after));
-    }
+    mirror_lines.extend(
+        find_horizontal_mirror_lines(&rotated)
+            .iter()
+            .map(|(_, after)| (Split::Vertical, *after))
+            .collect::<Vec<(Split, usize)>>(),
+    );
 
-    None
+    mirror_lines
 }
 
-fn find_horizontal_mirror_line(pattern: &Pattern) -> Option<(Split, usize)> {
+fn find_horizontal_mirror_lines(pattern: &Pattern) -> Vec<(Split, usize)> {
+    let mut mirror_lines = vec![];
+
     let width = pattern.objects[0].len();
 
     'mirror_line: for line_nr in 0..pattern.objects.len() - 1 {
@@ -128,7 +170,8 @@ fn find_horizontal_mirror_line(pattern: &Pattern) -> Option<(Split, usize)> {
             if pattern.objects.get(line_nr - check_iter).is_none()
                 || pattern.objects.get(line_nr + check_iter + 1).is_none()
             {
-                return Some((Split::Horizontal, line_nr));
+                mirror_lines.push((Split::Horizontal, line_nr));
+                continue;
             }
 
             for char_index in 0..width {
@@ -140,10 +183,13 @@ fn find_horizontal_mirror_line(pattern: &Pattern) -> Option<(Split, usize)> {
             }
         }
 
-        return Some((Split::Horizontal, line_nr));
+        mirror_lines.push((Split::Horizontal, line_nr));
     }
 
-    None
+    mirror_lines.sort();
+    mirror_lines.dedup();
+
+    mirror_lines
 }
 
 fn rotate_objects_clockwise(original: &Pattern) -> Pattern {
@@ -174,8 +220,8 @@ fn parse(input: &str) -> Vec<Pattern> {
                 .map(|row| {
                     row.chars()
                         .map(|ch| match ch {
-                            '#' => ObjectType::Ash,
-                            '.' => ObjectType::Rocks,
+                            '.' => ObjectType::Ash,
+                            '#' => ObjectType::Rocks,
                             other => {
                                 panic!("We encountered '{other}', which is not ash and not rocks")
                             }
