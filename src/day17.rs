@@ -1,4 +1,9 @@
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::{
+    cell::RefCell,
+    collections::{BinaryHeap, HashMap, HashSet},
+    hash::Hash,
+    rc::Rc,
+};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd)]
 enum Direction {
@@ -42,17 +47,34 @@ fn part1(input: &String) -> usize {
         })
         .unwrap();
 
-    let heat_loss = shortest_path(graph, start, destination);
+    let (heat_loss, path) = shortest_path(graph, start, destination);
 
-    return heat_loss.unwrap();
+    visualize_path(input, path);
+
+    return heat_loss;
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone)]
 struct DiscoveredPath {
     position: Point,
     cost: usize,
     last_direction: Option<Direction>,
     steps_since_direction_change: usize,
+    predecessor: Option<Rc<DiscoveredPath>>,
+}
+
+impl Hash for DiscoveredPath {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.position.hash(state);
+        self.cost.hash(state);
+        self.last_direction.hash(state);
+        self.steps_since_direction_change.hash(state);
+
+        // Optionally, you can include some unique identifier of the predecessor.
+        // However, hashing the entire predecessor path might lead to issues due to potential cycles.
+        // So, we usually avoid hashing `Rc` types directly.
+        // If you have a unique identifier like an ID in the DiscoveredPath, you can hash that.
+    }
 }
 
 struct PathInfo {
@@ -60,24 +82,25 @@ struct PathInfo {
     steps_since_direction_change: usize,
 }
 
-fn shortest_path(graph: Graph, start: Point, destination: Point) -> Option<usize> {
-    let mut discovered_nodes: HashMap<DiscoveredPath, usize> = HashMap::new();
-    let mut visited: HashMap<(Point, Option<Direction>), PathInfo> = HashMap::new();
+fn shortest_path(graph: Graph, start: Point, destination: Point) -> (usize, Vec<Point>) {
+    let mut discovered_nodes: HashMap<Rc<DiscoveredPath>, usize> = HashMap::new();
+    let mut visited: HashMap<(Point, Option<Direction>, usize), PathInfo> = HashMap::new();
     let mut cheapest = usize::MAX;
 
-    let mut priority_queue = BinaryHeap::new();
+    let mut priority_queue: BinaryHeap<Rc<DiscoveredPath>> = BinaryHeap::new();
 
     let initial = DiscoveredPath {
         position: start,
         cost: 0,
         last_direction: None,
         steps_since_direction_change: 0,
+        predecessor: None,
     };
 
-    priority_queue.push(initial);
+    priority_queue.push(Rc::new(initial));
 
     visited.insert(
-        (start, None),
+        (start, None, 0),
         PathInfo {
             cost: 0,
             steps_since_direction_change: 0,
@@ -85,26 +108,25 @@ fn shortest_path(graph: Graph, start: Point, destination: Point) -> Option<usize
     );
 
     while let Some(path) = priority_queue.pop() {
-        visited.insert(
-            (path.position, path.last_direction),
-            PathInfo {
-                steps_since_direction_change: path.steps_since_direction_change,
-                cost: path.cost,
-            },
-        );
-
-        if path.position == destination {
-            if path.cost < cheapest {
-                cheapest = path.cost;
-                println!("Found new cheapest: {cheapest}");
-            }
-            continue;
+        if path.position == (12, 12) {
+            println!("Found a potential path to the destination with cost {}", path.cost);
         }
 
         if let Some(cheapest_so_far) = discovered_nodes.get(&path) {
             if path.cost > *cheapest_so_far {
                 continue;
+            } else {
+                discovered_nodes.insert(Rc::clone(&path), path.cost);
             }
+        } else {
+            discovered_nodes.insert(Rc::clone(&path), path.cost);
+        }
+
+        if path.position == destination {
+            if path.cost < cheapest {
+                cheapest = path.cost;
+            }
+            continue;
         }
 
         for neighbor in graph.get(&path.position).unwrap() {
@@ -114,50 +136,74 @@ fn shortest_path(graph: Graph, start: Point, destination: Point) -> Option<usize
                 false => 0,
             };
 
+
+            if neighbor.position == (12, 12) {
+                println!("Found a destination as a neighbor. Cost: {}", path.cost + neighbor.cost);
+            }
+
             if steps_since_direction_change > 2 {
                 continue;
             }
 
-            let next = DiscoveredPath {
+            let next = Rc::new(DiscoveredPath {
                 position: neighbor.position,
                 cost: path.cost + neighbor.cost,
                 last_direction: direction,
                 steps_since_direction_change,
+                predecessor: Some(Rc::clone(&path)),
+            });
+
+            let path_info = PathInfo {
+                cost: next.cost,
+                steps_since_direction_change: next.steps_since_direction_change,
             };
 
-            let is_better_path =
-                if let Some(existing) = visited.get(&(neighbor.position, direction)) {
-                    next.cost < existing.cost
-                } else {
-                    true // not visited in this direction yet
-                };
+            // Check if this path is better than any previously discovered path
+            let is_better_path = match visited.get(&(neighbor.position, direction, steps_since_direction_change)) {
+                Some(existing) => next.cost < existing.cost,
+                None => true, // Path not visited in this direction yet
+            };
 
             if is_better_path {
-                visited.insert(
-                    (neighbor.position, direction),
-                    PathInfo {
-                        cost: next.cost,
-                        steps_since_direction_change: next.steps_since_direction_change,
-                    },
-                );
+                visited.insert((neighbor.position, direction, steps_since_direction_change), path_info);
                 priority_queue.push(next);
-            }
-
-            continue;
-
-            if let Some(cheapest_so_far) = discovered_nodes.get(&next) {
-                if next.cost < *cheapest_so_far {
-                    priority_queue.push(next.clone());
-                    discovered_nodes.insert(next.clone(), next.cost);
-                }
-            } else {
-                priority_queue.push(next.clone());
-                discovered_nodes.insert(next.clone(), next.cost);
             }
         }
     }
 
-    Some(cheapest)
+    let shortest_path_end_node = discovered_nodes
+        .iter()
+        .filter(|p| p.0.position == destination)
+        .reduce(|a, b| {
+            if a.0.cost < b.0.cost {
+                return a;
+            } else {
+                return b;
+            }
+        })
+        .unwrap();
+
+    (
+        shortest_path_end_node.0.cost,
+        extract_path(shortest_path_end_node.0.clone()),
+    )
+}
+
+fn extract_path(end_path: Rc<DiscoveredPath>) -> Vec<Point> {
+    let mut path = Vec::new();
+    let mut current = Some(end_path);
+
+    while let Some(current_path) = current {
+        path.push(current_path.position);
+        current = if let Some(pred) = &current_path.predecessor {
+            Some(pred.clone())
+        } else {
+            None
+        };
+    }
+
+    path.reverse();
+    path
 }
 
 fn relative_direction((a_x, a_y): (usize, usize), (b_x, b_y): (usize, usize)) -> Option<Direction> {
@@ -172,6 +218,27 @@ fn relative_direction((a_x, a_y): (usize, usize), (b_x, b_y): (usize, usize)) ->
     }
 
     None
+}
+
+fn visualize_path(input: &str, path: Vec<Point>) {
+    let city = parse(input);
+    let width = city[0].len();
+    let height = city.len();
+
+    let mut output = "Path:\n\n".to_string();
+
+    for y in 0..height {
+        for x in 0..width {
+            if path.contains(&(x, y)) {
+                output.push_str("+");
+            } else {
+                output.push_str(&city[y][x].to_string());
+            }
+        }
+        output.push_str("\n");
+    }
+
+    println!("{output}");
 }
 
 fn part2(input: &String) -> usize {
