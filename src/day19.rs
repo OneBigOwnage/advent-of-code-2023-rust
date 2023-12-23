@@ -14,16 +14,17 @@ impl MachinePart {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-struct Workflow<'a> {
-    name: &'a str,
-    rules: Vec<Rule<'a>>,
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+struct Workflow {
+    name: String,
+    rules: Vec<Rule>,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-struct Rule<'a> {
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+struct Rule {
+    workflow: String,
     rule_kind: RuleType,
-    outcome_type: OutcomeType<'a>,
+    outcome_type: OutcomeType,
     which_rating: Option<RatingType>,
     symbol: Option<SymbolType>,
     rate_check_amount: Option<usize>,
@@ -49,17 +50,54 @@ enum RuleType {
     CatchAll,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-enum OutcomeType<'a> {
-    SendToWorkflow(&'a str),
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+enum OutcomeType {
+    SendToWorkflow(String),
     AcceptImmediately,
     RejectImmediately,
 }
 
 fn main() {
-    assert_eq!(19114, part1(&test_input()));
-    assert_eq!(0, part1(&input()));
-    assert_eq!(0, part2(&test_input()));
+    let binding = test_input();
+    let (workflows, _) = parse(&binding);
+
+    let lnx_accept: Rule = workflows
+        .iter()
+        .flat_map(|workflow| workflow.rules.clone())
+        .find(|rule| rule.workflow == "lnx" && rule.outcome_type == OutcomeType::AcceptImmediately)
+        .unwrap()
+        .to_owned();
+
+    let mut next = workflows
+        .iter()
+        .find(|workflow| workflow.rules.contains(&lnx_accept))
+        .unwrap();
+
+    let mut list: Vec<&Workflow> = vec![next];
+
+    while next.name != "in" {
+        next = workflows
+            .iter()
+            .find(|workflow| {
+                workflow
+                    .rules
+                    .iter()
+                    .any(|rule| rule.outcome_type == OutcomeType::SendToWorkflow(next.name.clone()))
+            })
+            .unwrap();
+        list.push(next);
+    }
+
+    dbg!(list
+        .iter()
+        .map(|flow| flow.name.clone())
+        .collect::<Vec<_>>());
+
+    return;
+
+    assert_eq!(19_114, part1(&test_input()));
+    assert_eq!(333_263, part1(&input()));
+    assert_eq!(167_409_079_868_000, part2(&test_input()));
     assert_eq!(0, part2(&input()));
 }
 
@@ -117,10 +155,10 @@ fn is_accepted(part: &MachinePart, workflows: &Vec<Workflow>) -> bool {
                 }
             }
 
-            if let OutcomeType::SendToWorkflow(next) = rule.outcome_type {
+            if let OutcomeType::SendToWorkflow(next) = &rule.outcome_type {
                 current_workflow = workflows
                     .iter()
-                    .find(|workflow| workflow.name == next)
+                    .find(|workflow| workflow.name == *next)
                     .unwrap();
                 break;
             } else if rule.outcome_type == OutcomeType::RejectImmediately {
@@ -132,7 +170,7 @@ fn is_accepted(part: &MachinePart, workflows: &Vec<Workflow>) -> bool {
     }
 }
 
-fn parse<'a>(input: &'a str) -> (Vec<Workflow<'a>>, Vec<MachinePart>) {
+fn parse<'a>(input: &'a str) -> (Vec<Workflow>, Vec<MachinePart>) {
     let binding = input.split("\n\n").collect::<Vec<&str>>();
     let split = binding.as_slice();
 
@@ -140,12 +178,12 @@ fn parse<'a>(input: &'a str) -> (Vec<Workflow<'a>>, Vec<MachinePart>) {
     let rule_regex = Regex::new(r"(x|m|s|a)(<|>)(\d+):(R|A|\w+)").unwrap();
     let catch_all_regext = Regex::new(r"(R|A|\w+)").unwrap();
 
-    let workflows: Vec<Workflow<'_>> = split[0]
+    let workflows: Vec<Workflow> = split[0]
         .split("\n")
         .map(|line| {
             let (_, [name, rules]) = name_regex.captures(line).unwrap().extract();
 
-            let rules: Vec<Rule<'_>> = rules
+            let rules: Vec<Rule> = rules
                 .split(",")
                 .map(|raw_rule| {
                     if raw_rule.contains(":") {
@@ -153,11 +191,14 @@ fn parse<'a>(input: &'a str) -> (Vec<Workflow<'a>>, Vec<MachinePart>) {
                             rule_regex.captures(raw_rule).unwrap().extract();
 
                         return Rule {
+                            workflow: name.to_string(),
                             rule_kind: RuleType::RatingCheck,
                             outcome_type: match outcome_type {
                                 "A" => OutcomeType::AcceptImmediately,
                                 "R" => OutcomeType::RejectImmediately,
-                                next_workflow => OutcomeType::SendToWorkflow(next_workflow),
+                                next_workflow => {
+                                    OutcomeType::SendToWorkflow(next_workflow.to_string())
+                                }
                             },
                             which_rating: match which_rating {
                                 "x" => Some(RatingType::X),
@@ -178,11 +219,14 @@ fn parse<'a>(input: &'a str) -> (Vec<Workflow<'a>>, Vec<MachinePart>) {
                             catch_all_regext.captures(raw_rule).unwrap().extract();
 
                         return Rule {
+                            workflow: name.to_string(),
                             rule_kind: RuleType::CatchAll,
                             outcome_type: match catch_all {
                                 "A" => OutcomeType::AcceptImmediately,
                                 "R" => OutcomeType::RejectImmediately,
-                                next_workflow => OutcomeType::SendToWorkflow(next_workflow),
+                                next_workflow => {
+                                    OutcomeType::SendToWorkflow(next_workflow.to_string())
+                                }
                             },
                             which_rating: None,
                             symbol: None,
@@ -192,7 +236,10 @@ fn parse<'a>(input: &'a str) -> (Vec<Workflow<'a>>, Vec<MachinePart>) {
                 })
                 .collect();
 
-            Workflow { name, rules }
+            Workflow {
+                name: name.to_string(),
+                rules,
+            }
         })
         .collect();
 
