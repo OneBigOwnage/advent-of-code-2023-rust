@@ -1,3 +1,20 @@
+enum Pulse {
+    Low,
+    High,
+}
+
+enum ModuleType {
+    Broadcast,
+    FlipFlop,
+    Conjunction(Vec<(String, Option<bool>)>),
+}
+
+struct Module {
+    name: String,
+    module_type: ModuleType,
+    outputs_to: Vec<String>,
+}
+
 fn main() {
     assert_eq!(32_000_000, part1(&test_input()));
     assert_eq!(11_687_500, part1(&test_input_2()));
