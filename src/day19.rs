@@ -24,11 +24,104 @@ struct Workflow {
 
 impl Workflow {
     fn get_constraints_for_desired_result(&self, desired_rule: &Rule) -> Constraints {
-        let con = Constraints::new();
+        let mut con = Constraints::new();
 
         for rule in &self.rules {
             if rule != desired_rule {
-                println!("We need to NOT satisfy this constraints: {}", rule);
+                if rule.symbol == Some(SymbolType::GreaterThan) {
+                    match rule.which_rating {
+                        Some(RatingType::X) => {
+                            con.x = *con.x.start()
+                                ..=usize::min(*con.x.end(), rule.rate_check_amount.unwrap())
+                        }
+                        Some(RatingType::M) => {
+                            con.m = *con.m.start()
+                                ..=usize::min(*con.m.end(), rule.rate_check_amount.unwrap())
+                        }
+                        Some(RatingType::A) => {
+                            con.a = *con.a.start()
+                                ..=usize::min(*con.a.end(), rule.rate_check_amount.unwrap())
+                        }
+                        Some(RatingType::S) => {
+                            con.s = *con.s.start()
+                                ..=usize::min(*con.s.end(), rule.rate_check_amount.unwrap())
+                        }
+
+                        None => panic!(),
+                    };
+                } else if rule.symbol == Some(SymbolType::LesserThan) {
+                    match rule.which_rating {
+                        Some(RatingType::X) => {
+                            con.x = usize::max(*con.x.start(), rule.rate_check_amount.unwrap())
+                                ..=*con.x.end()
+                        }
+                        Some(RatingType::M) => {
+                            con.m = usize::max(*con.m.start(), rule.rate_check_amount.unwrap())
+                                ..=*con.m.end()
+                        }
+                        Some(RatingType::A) => {
+                            con.a = usize::max(*con.a.start(), rule.rate_check_amount.unwrap())
+                                ..=*con.a.end()
+                        }
+                        Some(RatingType::S) => {
+                            con.s = usize::max(*con.s.start(), rule.rate_check_amount.unwrap())
+                                ..=*con.s.end()
+                        }
+
+                        None => panic!(),
+                    };
+                }
+            } else {
+                if rule.rule_type == RuleType::RatingCheck {
+                    if rule.symbol == Some(SymbolType::GreaterThan) {
+                        match rule.which_rating {
+                            Some(RatingType::X) => {
+                                con.x =
+                                    usize::max(*con.x.start(), rule.rate_check_amount.unwrap() + 1)
+                                        ..=*con.x.end()
+                            }
+                            Some(RatingType::M) => {
+                                con.m =
+                                    usize::max(*con.m.start(), rule.rate_check_amount.unwrap() + 1)
+                                        ..=*con.m.end()
+                            }
+                            Some(RatingType::A) => {
+                                con.a =
+                                    usize::max(*con.a.start(), rule.rate_check_amount.unwrap() + 1)
+                                        ..=*con.a.end()
+                            }
+                            Some(RatingType::S) => {
+                                con.s =
+                                    usize::max(*con.s.start(), rule.rate_check_amount.unwrap() + 1)
+                                        ..=*con.s.end()
+                            }
+
+                            None => panic!(),
+                        };
+                    } else if rule.symbol == Some(SymbolType::LesserThan) {
+                        match rule.which_rating {
+                            Some(RatingType::X) => {
+                                con.x = *con.x.start()
+                                    ..=usize::min(*con.x.end(), rule.rate_check_amount.unwrap() - 1)
+                            }
+                            Some(RatingType::M) => {
+                                con.m = *con.m.start()
+                                    ..=usize::min(*con.m.end(), rule.rate_check_amount.unwrap() - 1)
+                            }
+                            Some(RatingType::A) => {
+                                con.a = *con.a.start()
+                                    ..=usize::min(*con.a.end(), rule.rate_check_amount.unwrap() - 1)
+                            }
+                            Some(RatingType::S) => {
+                                con.s = *con.s.start()
+                                    ..=usize::min(*con.s.end(), rule.rate_check_amount.unwrap() - 1)
+                            }
+
+                            None => panic!(),
+                        };
+                    }
+                }
+                break;
             }
         }
 
@@ -39,7 +132,7 @@ impl Workflow {
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 struct Rule {
     workflow: String,
-    rule_kind: RuleType,
+    rule_type: RuleType,
     outcome_type: OutcomeType,
     which_rating: Option<RatingType>,
     symbol: Option<SymbolType>,
@@ -48,13 +141,14 @@ struct Rule {
 
 impl Display for Rule {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.rule_kind == RuleType::CatchAll {
-            return write!(f, "Catch all");
+        if self.rule_type == RuleType::CatchAll {
+            return write!(f, "{}: Catch all", self.workflow);
         }
 
         write!(
             f,
-            "{}{}{}",
+            "{}: {}{}{}",
+            self.workflow,
             self.which_rating.unwrap(),
             self.symbol.unwrap(),
             self.rate_check_amount.unwrap()
@@ -85,11 +179,33 @@ impl Constraints {
             * self.a.clone().collect::<Vec<usize>>().len()
             * self.s.clone().collect::<Vec<usize>>().len()
     }
+
+    fn constrain_further(&mut self, other: &Self) {
+        self.x = usize::max(*self.x.start(), *other.x.start())
+            ..=usize::min(*self.x.end(), *other.x.end());
+        self.m = usize::max(*self.m.start(), *other.m.start())
+            ..=usize::min(*self.m.end(), *other.m.end());
+        self.a = usize::max(*self.a.start(), *other.a.start())
+            ..=usize::min(*self.a.end(), *other.a.end());
+        self.s = usize::max(*self.s.start(), *other.s.start())
+            ..=usize::min(*self.s.end(), *other.s.end());
+    }
 }
 
 impl Display for Constraints {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "x < 1000")
+        write!(
+            f,
+            "Constraints: X: {}-{}. M: {}-{}. A: {}-{}. S: {}-{}.",
+            self.x.start(),
+            self.x.end(),
+            self.m.start(),
+            self.m.end(),
+            self.a.start(),
+            self.a.end(),
+            self.s.start(),
+            self.s.end(),
+        )
     }
 }
 
@@ -149,56 +265,43 @@ enum OutcomeType {
 }
 
 fn main() {
-    let binding = test_input();
-    let (workflows, _) = parse(&binding);
-
-    let lnx_accept: Rule = workflows
-        .iter()
-        .flat_map(|workflow| workflow.rules.clone())
-        .find(|rule| rule.workflow == "lnx" && rule.outcome_type == OutcomeType::AcceptImmediately)
-        .unwrap()
-        .to_owned();
-
-    let mut next = workflows
-        .iter()
-        .find(|workflow| workflow.rules.contains(&lnx_accept))
-        .unwrap();
-
-    let mut list: Vec<&Workflow> = vec![next];
-
-    while next.name != "in" {
-        next = workflows
-            .iter()
-            .find(|workflow| {
-                let rule = workflow.rules.iter().find(|rule| {
-                    rule.outcome_type == OutcomeType::SendToWorkflow(next.name.clone())
-                });
-
-                if let Some(via) = rule {
-                    let constraints = workflow.get_constraints_for_desired_result(&via);
-
-                    println!("We need to satisfy this: {}", constraints);
-
-                    return true;
-                }
-
-                false
-            })
-            .unwrap();
-        list.push(next);
-    }
-
-    dbg!(list
-        .iter()
-        .map(|flow| flow.name.clone())
-        .collect::<Vec<_>>());
-
-    return;
-
     assert_eq!(19_114, part1(&test_input()));
     assert_eq!(333_263, part1(&input()));
     assert_eq!(167_409_079_868_000, part2(&test_input()));
-    assert_eq!(0, part2(&input()));
+    assert_eq!(130_745_440_937_650, part2(&input()));
+}
+
+fn how_to_get_there(start: &Rule, workflows: &Vec<Workflow>) -> Constraints {
+    let mut constraints = Constraints::new();
+
+    let mut current_rule = Some(start.clone());
+    let mut current_workflow = workflows
+        .iter()
+        .find(|workflow| workflow.name == start.workflow);
+
+    while let Some(workflow) = current_workflow {
+        constraints.constrain_further(
+            &workflow.get_constraints_for_desired_result(&current_rule.clone().unwrap()),
+        );
+
+        current_workflow = workflows.iter().find(|wf| {
+            wf.rules
+                .iter()
+                .any(|rule| rule.outcome_type == OutcomeType::SendToWorkflow(workflow.name.clone()))
+        });
+
+        if let Some(next) = current_workflow {
+            current_rule = next
+                .rules
+                .iter()
+                .find(|rule| {
+                    rule.outcome_type == OutcomeType::SendToWorkflow(workflow.name.clone())
+                })
+                .cloned();
+        }
+    }
+
+    constraints
 }
 
 fn part1(input: &str) -> usize {
@@ -212,7 +315,64 @@ fn part1(input: &str) -> usize {
 }
 
 fn part2(input: &str) -> usize {
-    todo!();
+    let (workflows, _) = parse(input);
+
+    let all_possibilities = 4000_usize.pow(4);
+
+    let accepted_possibilities = workflows
+        .iter()
+        .flat_map(|workflow| workflow.rules.clone())
+        .filter(|rule| rule.outcome_type == OutcomeType::AcceptImmediately)
+        .map(|rule| {
+            let con = how_to_get_there(&rule, &workflows);
+
+            // println!(
+            //     "{rule}. Constraints to get there: {con}. Combinations possible: {}",
+            //     con.combinations()
+            //         .to_string()
+            //         .as_bytes()
+            //         .rchunks(3)
+            //         .rev()
+            //         .map(std::str::from_utf8)
+            //         .collect::<Result<Vec<&str>, _>>()
+            //         .unwrap()
+            //         .join(",")
+            // );
+
+            con.combinations()
+        })
+        .sum();
+
+    let rejected_possibilities = workflows
+        .iter()
+        .flat_map(|workflow| workflow.rules.clone())
+        .filter(|rule| rule.outcome_type == OutcomeType::RejectImmediately)
+        .map(|rule| {
+            let con = how_to_get_there(&rule, &workflows);
+
+            // println!(
+            //     "{rule}. Constraints to get there: {con}. Combinations possible: {}",
+            //     con.combinations()
+            //         .to_string()
+            //         .as_bytes()
+            //         .rchunks(3)
+            //         .rev()
+            //         .map(std::str::from_utf8)
+            //         .collect::<Result<Vec<&str>, _>>()
+            //         .unwrap()
+            //         .join(",")
+            // );
+
+            con.combinations()
+        })
+        .sum::<usize>();
+
+    assert_eq!(
+        all_possibilities,
+        rejected_possibilities + accepted_possibilities
+    );
+
+    accepted_possibilities
 }
 
 fn is_accepted(part: &MachinePart, workflows: &Vec<Workflow>) -> bool {
@@ -223,7 +383,7 @@ fn is_accepted(part: &MachinePart, workflows: &Vec<Workflow>) -> bool {
 
     loop {
         for rule in &current_workflow.rules {
-            if rule.rule_kind == RuleType::RatingCheck {
+            if rule.rule_type == RuleType::RatingCheck {
                 let specific_rating = match rule.which_rating {
                     Some(RatingType::X) => part.x,
                     Some(RatingType::M) => part.m,
@@ -292,7 +452,7 @@ fn parse<'a>(input: &'a str) -> (Vec<Workflow>, Vec<MachinePart>) {
 
                         return Rule {
                             workflow: name.to_string(),
-                            rule_kind: RuleType::RatingCheck,
+                            rule_type: RuleType::RatingCheck,
                             outcome_type: match outcome_type {
                                 "A" => OutcomeType::AcceptImmediately,
                                 "R" => OutcomeType::RejectImmediately,
@@ -320,7 +480,7 @@ fn parse<'a>(input: &'a str) -> (Vec<Workflow>, Vec<MachinePart>) {
 
                         return Rule {
                             workflow: name.to_string(),
-                            rule_kind: RuleType::CatchAll,
+                            rule_type: RuleType::CatchAll,
                             outcome_type: match catch_all {
                                 "A" => OutcomeType::AcceptImmediately,
                                 "R" => OutcomeType::RejectImmediately,
