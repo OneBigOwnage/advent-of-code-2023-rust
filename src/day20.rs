@@ -1,14 +1,19 @@
+use regex::Regex;
+
+#[derive(Debug)]
 enum Pulse {
     Low,
     High,
 }
 
+#[derive(Debug)]
 enum ModuleType {
     Broadcast,
-    FlipFlop,
-    Conjunction(Vec<(String, Option<bool>)>),
+    FlipFlop(bool),
+    Conjunction(Vec<(String, Pulse)>),
 }
 
+#[derive(Debug)]
 struct Module {
     name: String,
     module_type: ModuleType,
@@ -24,11 +29,83 @@ fn main() {
 }
 
 fn part1(input: &str) -> usize {
+    dbg!(parse(input));
+
     todo!();
 }
 
 fn part2(input: &str) -> usize {
     todo!();
+}
+
+fn parse(input: &str) -> Vec<Module> {
+    let re = Regex::new(r"(?:(&|%)(\w+)|broadcaster) -> (.*)").unwrap();
+    let broadcaster_re = Regex::new(r"broadcaster -> (.*)").unwrap();
+
+    let conjunction_mapping = input
+        .split("\n")
+        .map(|line| -> (String, Vec<String>) {
+            if line.contains("broadcaster") {
+                let (_, [raw_outputs_to]) = broadcaster_re.captures(line).unwrap().extract();
+
+                return (
+                    "broadcaster".to_string(),
+                    raw_outputs_to
+                        .split(", ")
+                        .map(|name| name.to_string())
+                        .collect(),
+                );
+            } else {
+                let (_, [_, name, raw_outputs_to]) = re.captures(line).unwrap().extract();
+                return (
+                    name.to_string(),
+                    raw_outputs_to
+                        .split(", ")
+                        .map(|name| name.to_string())
+                        .collect(),
+                );
+            }
+        })
+        .collect::<Vec<(String, Vec<String>)>>();
+
+    input
+        .split("\n")
+        .map(|line| {
+            if line.contains("broadcaster") {
+                let (_, [raw_outputs_to]) = broadcaster_re.captures(line).unwrap().extract();
+
+                Module {
+                    name: "broadcaster".to_string(),
+                    module_type: ModuleType::Broadcast,
+                    outputs_to: raw_outputs_to
+                        .split(", ")
+                        .map(|name| name.to_string())
+                        .collect::<Vec<String>>(),
+                }
+            } else {
+                let (_, [raw_type, name, raw_outputs_to]) = re.captures(line).unwrap().extract();
+
+                Module {
+                    name: name.to_string(),
+                    module_type: match raw_type {
+                        "%" => ModuleType::FlipFlop(false),
+                        "&" => ModuleType::Conjunction(
+                            conjunction_mapping
+                                .iter()
+                                .filter(|(_, to)| to.contains(&name.to_string()))
+                                .map(|(from, _)| (from.to_owned(), Pulse::Low))
+                                .collect(),
+                        ),
+                        other => panic!("Cannot parse {other} into ModuleType"),
+                    },
+                    outputs_to: raw_outputs_to
+                        .split(", ")
+                        .map(|name| name.to_string())
+                        .collect::<Vec<String>>(),
+                }
+            }
+        })
+        .collect::<Vec<Module>>()
 }
 
 #[allow(dead_code)]
