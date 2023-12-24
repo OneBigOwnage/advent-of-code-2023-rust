@@ -1,3 +1,5 @@
+use std::{fmt::Display, ops::RangeInclusive};
+
 use regex::Regex;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -20,6 +22,20 @@ struct Workflow {
     rules: Vec<Rule>,
 }
 
+impl Workflow {
+    fn get_constraints_for_desired_result(&self, desired_rule: &Rule) -> Constraints {
+        let con = Constraints::new();
+
+        for rule in &self.rules {
+            if rule != desired_rule {
+                println!("We need to NOT satisfy this constraints: {}", rule);
+            }
+        }
+
+        con
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 struct Rule {
     workflow: String,
@@ -30,6 +46,53 @@ struct Rule {
     rate_check_amount: Option<usize>,
 }
 
+impl Display for Rule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.rule_kind == RuleType::CatchAll {
+            return write!(f, "Catch all");
+        }
+
+        write!(
+            f,
+            "{}{}{}",
+            self.which_rating.unwrap(),
+            self.symbol.unwrap(),
+            self.rate_check_amount.unwrap()
+        )
+    }
+}
+
+struct Constraints {
+    x: RangeInclusive<usize>,
+    m: RangeInclusive<usize>,
+    a: RangeInclusive<usize>,
+    s: RangeInclusive<usize>,
+}
+
+impl Constraints {
+    fn new() -> Constraints {
+        Constraints {
+            x: 1..=4000,
+            m: 1..=4000,
+            a: 1..=4000,
+            s: 1..=4000,
+        }
+    }
+
+    fn combinations(&self) -> usize {
+        self.x.clone().collect::<Vec<usize>>().len()
+            * self.m.clone().collect::<Vec<usize>>().len()
+            * self.a.clone().collect::<Vec<usize>>().len()
+            * self.s.clone().collect::<Vec<usize>>().len()
+    }
+}
+
+impl Display for Constraints {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "x < 1000")
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 enum RatingType {
     X,
@@ -38,10 +101,38 @@ enum RatingType {
     S,
 }
 
+impl Display for RatingType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                RatingType::X => "x",
+                RatingType::M => "m",
+                RatingType::A => "a",
+                RatingType::S => "s",
+            }
+        )
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 enum SymbolType {
     GreaterThan,
     LesserThan,
+}
+
+impl Display for SymbolType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                SymbolType::GreaterThan => ">",
+                SymbolType::LesserThan => "<",
+            }
+        )
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -79,10 +170,19 @@ fn main() {
         next = workflows
             .iter()
             .find(|workflow| {
-                workflow
-                    .rules
-                    .iter()
-                    .any(|rule| rule.outcome_type == OutcomeType::SendToWorkflow(next.name.clone()))
+                let rule = workflow.rules.iter().find(|rule| {
+                    rule.outcome_type == OutcomeType::SendToWorkflow(next.name.clone())
+                });
+
+                if let Some(via) = rule {
+                    let constraints = workflow.get_constraints_for_desired_result(&via);
+
+                    println!("We need to satisfy this: {}", constraints);
+
+                    return true;
+                }
+
+                false
             })
             .unwrap();
         list.push(next);
