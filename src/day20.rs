@@ -1,45 +1,215 @@
+use std::{collections::HashMap, fmt::Display, hash::Hash};
+
 use regex::Regex;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum Pulse {
     Low,
     High,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ModuleType {
     Broadcast,
     FlipFlop(bool),
-    Conjunction(Vec<(String, Pulse)>),
+    Conjunction(HashMap<String, Pulse>),
 }
 
-#[derive(Debug)]
+impl Hash for ModuleType {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            ModuleType::Broadcast => "broadcast".hash(state),
+            ModuleType::FlipFlop(_) => "flipflop".hash(state),
+            ModuleType::Conjunction(_) => "conjunction".hash(state),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Module {
     name: String,
     module_type: ModuleType,
     outputs_to: Vec<String>,
 }
 
+impl Module {
+    fn process_input(&mut self, signal: &Signal) -> Vec<Signal> {
+        match &mut self.module_type {
+            ModuleType::Broadcast => self
+                .outputs_to
+                .iter()
+                .map(|name| Signal {
+                    from: self.name.to_string(),
+                    to: name.to_string(),
+                    pulse: signal.pulse,
+                })
+                .collect(),
+            ModuleType::FlipFlop(ref mut is_on) => {
+                if signal.pulse == Pulse::High {
+                    return vec![];
+                }
+
+                *is_on = !*is_on;
+
+                self.outputs_to
+                    .iter()
+                    .map(|name| Signal {
+                        from: self.name.to_string(),
+                        to: name.to_string(),
+                        pulse: match *is_on {
+                            true => Pulse::High,
+                            false => Pulse::Low,
+                        },
+                    })
+                    .collect()
+            }
+            ModuleType::Conjunction(ref mut memory) => {
+                memory
+                    .get_mut(&signal.from)
+                    .and_then(|pulse| Some(*pulse = signal.pulse));
+
+                let pulse = match memory.iter().all(|(_, pulse)| *pulse == Pulse::High) {
+                    true => Pulse::Low,
+                    false => Pulse::High,
+                };
+
+                self.outputs_to
+                    .iter()
+                    .map(|name| Signal {
+                        from: self.name.to_string(),
+                        to: name.to_string(),
+                        pulse,
+                    })
+                    .collect()
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct Signal {
+    from: String,
+    to: String,
+    pulse: Pulse,
+}
+
+impl Display for Signal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} -{:?}-> {}", self.from, self.pulse, self.to)
+    }
+}
+
 fn main() {
     assert_eq!(32_000_000, part1(&test_input()));
     assert_eq!(11_687_500, part1(&test_input_2()));
-    assert_eq!(0, part1(&input()));
+    assert_eq!(898_557_000, part1(&input()));
     assert_eq!(0, part2(&test_input()));
     assert_eq!(0, part2(&input()));
 }
 
 fn part1(input: &str) -> usize {
-    dbg!(parse(input));
+    let mut modules = parse(input);
 
-    todo!();
+    let (mut low_pulse_count, mut high_pulse_count) = (0, 0);
+
+    for _ in 0..1000 {
+        let mut signals: Vec<Signal> = vec![Signal {
+            from: "button".to_string(),
+            to: "broadcaster".to_string(),
+            pulse: Pulse::Low,
+        }];
+
+        while !signals.is_empty() {
+            // for signal in &signals {
+            //     println!("{}", signal);
+            // }
+
+            low_pulse_count += signals
+                .iter()
+                .filter(|signal| signal.pulse == Pulse::Low)
+                .collect::<Vec<_>>()
+                .len();
+            high_pulse_count += signals
+                .iter()
+                .filter(|signal| signal.pulse == Pulse::High)
+                .collect::<Vec<_>>()
+                .len();
+
+            let mut next_signals: Vec<Signal> = vec![];
+
+            for signal in &signals {
+                let module = modules.iter_mut().find(|module| module.name == *signal.to);
+
+                if let Some(module) = module {
+                    let output = module.process_input(signal);
+                    next_signals.extend(output);
+                };
+            }
+
+            signals = next_signals;
+        }
+    }
+
+    low_pulse_count * high_pulse_count
 }
 
 fn part2(input: &str) -> usize {
-    todo!();
+    let mut modules: HashMap<String, Module> = parse(input)
+        .iter()
+        .map(|module| (module.name.to_owned(), module.to_owned()))
+        .collect();
+
+    let mut cache: HashMap<(Signal, Module), Vec<Signal>> = HashMap::new();
+
+    let mut number_of_button_presses = 0;
+
+    loop {
+        // This is a single button press
+        let mut signals: Vec<Signal> = vec![Signal {
+            from: "button".to_string(),
+            to: "broadcaster".to_string(),
+            pulse: Pulse::Low,
+        }];
+
+        number_of_button_presses += 1;
+
+        if number_of_button_presses % 1_000_000 == 0 {
+            println!("We have performed {number_of_button_presses} button presses");
+        }
+
+        while !signals.is_empty() {
+            // for signal in &signals {
+            //     println!("{}", signal);
+            // }
+
+            let mut next_signals: Vec<Signal> = vec![];
+
+            for signal in &signals {
+                let module = modules.get_mut(&signal.to);
+
+                if let Some(module) = module {
+                    let output: Vec<Signal> = cache
+                        .entry((signal.clone(), module.clone()))
+                        .or_insert_with(|| module.process_input(signal))
+                        .to_vec();
+                    next_signals.extend(output);
+                };
+            }
+
+            signals = next_signals;
+        }
+
+        if signals
+            .iter()
+            .any(|signal| signal.to == "rx" && signal.pulse == Pulse::Low)
+        {
+            return number_of_button_presses;
+        }
+    }
 }
 
 fn parse(input: &str) -> Vec<Module> {
-    let re = Regex::new(r"(?:(&|%)(\w+)|broadcaster) -> (.*)").unwrap();
+    let re = Regex::new(r"(?:(&|%)(\w+)) -> (.*)").unwrap();
     let broadcaster_re = Regex::new(r"broadcaster -> (.*)").unwrap();
 
     let conjunction_mapping = input
