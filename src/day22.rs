@@ -1,3 +1,11 @@
+use std::collections::HashSet;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct Point2D {
+    x: usize,
+    y: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct Point3D {
     x: usize,
@@ -7,16 +15,37 @@ struct Point3D {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct Brick {
+    name: usize,
     start: Point3D,
     end: Point3D,
 }
 
 impl Brick {
     fn does_xy_overlap(&self, other: Self) -> bool {
-        (other.start.x >= self.start.x && other.start.x <= self.end.x)
-            || (other.end.x >= self.start.x && other.end.x <= self.end.x)
-                && (other.start.y >= self.start.y && other.start.y <= self.end.y)
-            || (other.end.y >= self.start.y && other.end.y <= self.end.y)
+        let other_blocks = other.x_y_blocks();
+
+        self.x_y_blocks()
+            .iter()
+            .any(|point| other_blocks.contains(point))
+    }
+
+    fn x_y_blocks(&self) -> Vec<Point2D> {
+        if self.start.x != self.end.x {
+            (self.start.x..=self.end.x)
+                .into_iter()
+                .map(|x| Point2D { x, y: self.start.y })
+                .collect()
+        } else if self.start.y != self.end.y {
+            (self.start.y..=self.end.y)
+                .into_iter()
+                .map(|y| Point2D { x: self.start.x, y })
+                .collect()
+        } else {
+            vec![Point2D {
+                x: self.start.x,
+                y: self.start.y,
+            }]
+        }
     }
 
     fn fall(&mut self) {
@@ -27,35 +56,26 @@ impl Brick {
 
 fn main() {
     assert_eq!(5, part1(&test_input()));
-    // assert_eq!(0, part1(&input()));
-    // assert_eq!(0, part2(&test_input()));
-    // assert_eq!(0, part2(&input()));
+    assert_eq!(527, part1(&input()));
+    assert_eq!(7, part2(&test_input()));
+    assert_eq!(100376, part2(&input()));
 }
 
 fn part1(input: &str) -> usize {
     let bricks: &mut Vec<Brick> = &mut parse(input);
     let_everything_settle(bricks);
 
-    for i in 0..bricks.len() {
-        println!("{:?}", bricks[i]);
-    }
-
     bricks
         .iter()
-        .enumerate()
-        .filter(|(i, brick)| {
-            let before: &mut Vec<Brick> = &mut bricks
+        .filter(|brick| {
+            let everything_but_this_brick: &mut Vec<Brick> = &mut bricks
                 .clone()
                 .iter()
                 .filter(|b| b != brick)
                 .cloned()
                 .collect();
-            let after = &mut before.clone();
 
-            let_everything_settle(after);
-
-            println!("Can {i} be disintegrated? {:?}", before == after);
-            before == after
+            !can_anything_fall(everything_but_this_brick)
         })
         .count()
 }
@@ -99,14 +119,110 @@ fn let_everything_settle(bricks: &mut Vec<Brick>) {
     }
 }
 
+fn can_anything_fall(bricks: &Vec<Brick>) -> bool {
+    let bricks = &mut bricks.to_owned();
+
+    let max_z = bricks
+        .iter()
+        .map(|brick| brick.start.z.max(brick.end.z))
+        .max()
+        .unwrap();
+
+    // For each row, attempt to move something/everything one row down, if it doesn't rest on
+    // anything.
+    for row in 2..=max_z {
+        let bricks_below: Vec<Brick> = bricks
+            .iter()
+            .filter(|collidor| collidor.start.z.max(collidor.end.z) == row - 1)
+            .cloned()
+            .collect();
+
+        for brick in bricks
+            .iter_mut()
+            .filter(|brick| brick.start.z.min(brick.end.z) == row)
+        {
+            if !bricks_below
+                .iter()
+                .any(|collidor| brick.does_xy_overlap(*collidor))
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+fn how_many_bricks_moved_after_settling(bricks: &Vec<Brick>) -> usize {
+    let bricks: &mut Vec<Brick> = &mut bricks.to_owned();
+
+    let mut bricks_that_moved: HashSet<usize> = HashSet::new();
+
+    loop {
+        let mut did_anything_move = false;
+        let max_z = bricks
+            .iter()
+            .map(|brick| brick.start.z.max(brick.end.z))
+            .max()
+            .unwrap();
+
+        // For each row, attempt to move something/everything one row down, if it doesn't rest on
+        // anything.
+        for row in 2..=max_z {
+            let mut bricks_below: Vec<Brick> = bricks
+                .iter()
+                .filter(|collidor| collidor.start.z.max(collidor.end.z) == row - 1)
+                .cloned()
+                .collect();
+
+            for brick in bricks
+                .iter_mut()
+                .filter(|brick| brick.start.z.min(brick.end.z) == row)
+            {
+                if !bricks_below
+                    .iter()
+                    .any(|collidor| brick.does_xy_overlap(*collidor))
+                {
+                    brick.fall();
+                    bricks_below.push(brick.clone());
+                    did_anything_move = true;
+                    bricks_that_moved.insert(brick.name);
+                }
+            }
+        }
+
+        if !did_anything_move {
+            break;
+        }
+    }
+
+    bricks_that_moved.len()
+}
+
 fn part2(input: &str) -> usize {
-    todo!();
+    let bricks: &mut Vec<Brick> = &mut parse(input);
+    let_everything_settle(bricks);
+
+    bricks
+        .iter()
+        .map(|brick| {
+            let everything_but_this_brick: &mut Vec<Brick> = &mut bricks
+                .clone()
+                .iter()
+                .filter(|&b| b != brick)
+                .cloned()
+                .collect();
+
+            how_many_bricks_moved_after_settling(everything_but_this_brick)
+        })
+        .sum()
 }
 
 fn parse(input: &str) -> Vec<Brick> {
     input
         .split("\n")
-        .map(|line| -> Brick {
+        .enumerate()
+        .map(|(name, line)| -> Brick {
             let points: Vec<Point3D> = line
                 .split("~")
                 .map(|raw_coord| -> Point3D {
@@ -124,6 +240,7 @@ fn parse(input: &str) -> Vec<Brick> {
                 .collect();
 
             Brick {
+                name,
                 start: points[0],
                 end: points[1],
             }
