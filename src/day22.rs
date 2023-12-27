@@ -13,26 +13,54 @@ struct Brick {
 
 impl Brick {
     fn does_xy_overlap(&self, other: Self) -> bool {
-        // Overlapping on X axis
-        usize::max(self.start.x, self.end.x) >= usize::min(other.start.x, other.end.x)
-            || usize::min(self.start.x, self.end.x) <= usize::max(other.start.x, other.end.x)
+        (other.start.x >= self.start.x && other.start.x <= self.end.x)
+            || (other.end.x >= self.start.x && other.end.x <= self.end.x)
+                && (other.start.y >= self.start.y && other.start.y <= self.end.y)
+            || (other.end.y >= self.start.y && other.end.y <= self.end.y)
+    }
 
-        // Overlapping on Y axis
-        || usize::max(self.start.y, self.end.y) >= usize::min(other.start.y, other.end.y)
-            || usize::min(self.start.y, self.end.y) <= usize::max(other.start.y, other.end.y)
+    fn fall(&mut self) {
+        self.start.z -= 1;
+        self.end.z -= 1;
     }
 }
 
 fn main() {
     assert_eq!(5, part1(&test_input()));
-    assert_eq!(0, part1(&input()));
-    assert_eq!(0, part2(&test_input()));
-    assert_eq!(0, part2(&input()));
+    // assert_eq!(0, part1(&input()));
+    // assert_eq!(0, part2(&test_input()));
+    // assert_eq!(0, part2(&input()));
 }
 
 fn part1(input: &str) -> usize {
-    let mut bricks = parse(input);
+    let bricks: &mut Vec<Brick> = &mut parse(input);
+    let_everything_settle(bricks);
 
+    for i in 0..bricks.len() {
+        println!("{:?}", bricks[i]);
+    }
+
+    bricks
+        .iter()
+        .enumerate()
+        .filter(|(i, brick)| {
+            let before: &mut Vec<Brick> = &mut bricks
+                .clone()
+                .iter()
+                .filter(|b| b != brick)
+                .cloned()
+                .collect();
+            let after = &mut before.clone();
+
+            let_everything_settle(after);
+
+            println!("Can {i} be disintegrated? {:?}", before == after);
+            before == after
+        })
+        .count()
+}
+
+fn let_everything_settle(bricks: &mut Vec<Brick>) {
     loop {
         let mut did_anything_move = false;
         let max_z = bricks
@@ -43,19 +71,32 @@ fn part1(input: &str) -> usize {
 
         // For each row, attempt to move something/everything one row down, if it doesn't rest on
         // anything.
-        for row in 0..max_z {
-            todo!()
+        for row in 2..=max_z {
+            let mut bricks_below: Vec<Brick> = bricks
+                .iter()
+                .filter(|collidor| collidor.start.z.max(collidor.end.z) == row - 1)
+                .cloned()
+                .collect();
+
+            for brick in bricks
+                .iter_mut()
+                .filter(|brick| brick.start.z.min(brick.end.z) == row)
+            {
+                if !bricks_below
+                    .iter()
+                    .any(|collidor| brick.does_xy_overlap(*collidor))
+                {
+                    brick.fall();
+                    bricks_below.push(brick.clone());
+                    did_anything_move = true;
+                }
+            }
         }
 
-        if did_anything_move {
+        if !did_anything_move {
             break;
         }
     }
-
-    todo!() // We should be able to re-use the logic to move something to determine if something
-            // can be disintegrated safely. As anything that disintegrates causes the ability for
-            // the structure to move (original differs from the result of an attempted move)
-            // indicates the inability to safely disintegrate.
 }
 
 fn part2(input: &str) -> usize {
