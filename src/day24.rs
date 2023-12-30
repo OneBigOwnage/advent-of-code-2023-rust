@@ -1,11 +1,11 @@
 use regex::Regex;
 use std::{fmt::Display, ops::Sub};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 struct Point3D {
-    x: usize,
-    y: usize,
-    z: usize,
+    x: f64,
+    y: f64,
+    z: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
@@ -25,14 +25,14 @@ impl Sub for Point2D {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 struct Velocity3D {
-    x: i32,
-    y: i32,
-    z: i32,
+    x: f64,
+    y: f64,
+    z: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 struct Hailstone {
     starting_position: Point3D,
     velocities: Velocity3D,
@@ -54,74 +54,44 @@ impl Hailstone {
     }
 
     fn intersects_at(&self, other: &Self) -> Option<Point2D> {
-        // Source: https://docs.rs/line_intersection/latest/src/line_intersection/lib.rs.html#109
-        let p = Point2D {
-            x: self.starting_position.x as f64,
-            y: self.starting_position.y as f64,
-        };
-        let q = Point2D {
-            x: other.starting_position.x as f64,
-            y: other.starting_position.y as f64,
-        };
-        let r = self.position_after(1) - self.start();
-        let s = other.position_after(1) - other.start();
+        let determinant =
+            self.velocities.x * other.velocities.y - self.velocities.y * other.velocities.x;
 
-        let r_cross_s = Self::cross(&r, &s);
-        let q_minus_p = q - p;
-        let q_minus_p_cross_r = Self::cross(&q_minus_p, &r);
-
-        // are the lines are parallel?
-        if r_cross_s == 0.0 {
-            // are the lines collinear?
-            if q_minus_p_cross_r == 0.0 {
-                // the lines are collinear
-                None
-            } else {
-                // the lines are parallel but not collinear
-                None
-            }
-        } else {
-            // the lines are not parallel
-            let t = Self::cross(&q_minus_p, &Self::div(&s, r_cross_s));
-            let u = Self::cross(&q_minus_p, &Self::div(&r, r_cross_s));
-
-            // are the intersection coordinates both in range?
-            let t_in_range = f64::NEG_INFINITY <= t && t <= f64::INFINITY;
-            let u_in_range = f64::NEG_INFINITY <= u && u <= f64::INFINITY;
-
-            if t_in_range && u_in_range {
-                // there is an intersection
-                Some(Self::t_coord_to_point(&p, &r, t))
-            } else {
-                // there is no intersection
-                None
-            }
+        if determinant == 0.0 {
+            return None; //particles don't meet
         }
-    }
 
-    fn cross(a: &Point2D, b: &Point2D) -> f64 {
-        a.x * b.y - a.y * b.x
-    }
+        let foo_self = self.velocities.x * self.starting_position.y
+            - self.velocities.y * self.starting_position.x;
 
-    fn div(a: &Point2D, b: f64) -> Point2D {
-        Point2D {
-            x: a.x / b,
-            y: a.y / b,
-        }
-    }
+        let foo_other = other.velocities.x * other.starting_position.y
+            - other.velocities.y * other.starting_position.x;
 
-    fn t_coord_to_point(p: &Point2D, r: &Point2D, t: f64) -> Point2D {
-        Point2D {
-            x: p.x + t * r.x,
-            y: p.y + t * r.y,
-        }
+        return Some(Point2D {
+            x: (other.velocities.x * foo_self - self.velocities.x * foo_other) / determinant,
+            y: (other.velocities.y * foo_self - self.velocities.y * foo_other) / determinant,
+        });
     }
 
     fn is_in_future(&self, point: Point2D) -> bool {
-        ((self.velocities.x.is_positive() && point.x >= self.starting_position.x as f64)
-            || (self.velocities.x.is_negative() && point.x <= self.starting_position.x as f64))
-            && ((self.velocities.y.is_positive() && point.y >= self.starting_position.y as f64)
-                || (self.velocities.y.is_negative() && point.y <= self.starting_position.y as f64))
+        let is_x_in_future = match self.velocities.x.is_sign_positive() {
+            true => point.x >= self.starting_position.x,
+            false => point.x <= self.starting_position.x,
+        };
+
+        let is_y_in_future = match self.velocities.y.is_sign_positive() {
+            true => point.y >= self.starting_position.y,
+            false => point.y <= self.starting_position.y,
+        };
+
+        is_x_in_future && is_y_in_future
+    }
+
+    fn is_point_on_trajectory(&self, point: Point2D) -> bool {
+        let deviation_from_line = (point.x - self.starting_position.x) * self.velocities.y
+            - (point.y - self.starting_position.y) * self.velocities.x;
+
+        deviation_from_line.abs() < 0.0001
     }
 }
 
@@ -143,11 +113,11 @@ impl Display for Hailstone {
 fn main() {
     assert_eq!(2, part1(&test_input(), 7.0, 27.0));
     assert_eq!(
-        19976,
+        19_976,
         part1(&input(), 200_000_000_000_000.0, 400_000_000_000_000.0)
     );
     assert_eq!(47, part2(&test_input()));
-    // assert_eq!(0, part2(&input()));
+    assert_eq!(849_377_770_236_905, part2(&input()));
 }
 
 fn part1(input: &str, lower_bound: f64, upper_bound: f64) -> usize {
@@ -164,10 +134,8 @@ fn part1(input: &str, lower_bound: f64, upper_bound: f64) -> usize {
 
             match a.intersects_at(b) {
                 Some(intersection) => {
-                    intersection.x >= lower_bound
-                        && intersection.x <= upper_bound
-                        && intersection.y >= lower_bound
-                        && intersection.y <= upper_bound
+                    (lower_bound..=upper_bound).contains(&intersection.x)
+                        && (lower_bound..=upper_bound).contains(&intersection.y)
                         && a.is_in_future(intersection)
                         && b.is_in_future(intersection)
                 }
@@ -178,14 +146,128 @@ fn part1(input: &str, lower_bound: f64, upper_bound: f64) -> usize {
 }
 
 fn part2(input: &str) -> usize {
-    todo!();
+    let hailstones = parse(input);
+
+    let mut x: Option<i32> = None;
+    let mut y: Option<i32> = None;
+    let mut z: Option<i32> = None;
+
+    let translate = |hailstone: &Hailstone, by: Point2D| Hailstone {
+        starting_position: hailstone.starting_position,
+        velocities: Velocity3D {
+            x: hailstone.velocities.x - by.x,
+            y: hailstone.velocities.y - by.y,
+            z: hailstone.velocities.z,
+        },
+    };
+
+    let bruteforce = 250;
+
+    'bruteforce: for i in -bruteforce..=bruteforce {
+        for ii in -bruteforce..=bruteforce {
+            let potential = Point2D {
+                x: i as f64,
+                y: ii as f64,
+            };
+
+            for iii in 0..hailstones.len() {
+                for iiii in 0..hailstones.len() {
+                    if let Some(intersection) = translate(&hailstones[iii], potential)
+                        .intersects_at(&translate(&hailstones[iiii], potential))
+                    {
+                        if hailstones.iter().all(|hailstone| {
+                            translate(hailstone, potential).is_point_on_trajectory(intersection)
+                        }) {
+                            x = Some(potential.x as i32);
+                            y = Some(potential.y as i32);
+
+                            break 'bruteforce;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let fake_hailstones: Vec<Hailstone> = hailstones
+        .iter()
+        .map(|hailstone| Hailstone {
+            starting_position: Point3D {
+                x: hailstone.starting_position.z,
+                y: hailstone.starting_position.y,
+                z: hailstone.starting_position.x,
+            },
+            velocities: Velocity3D {
+                x: hailstone.velocities.z,
+                y: hailstone.velocities.y,
+                z: hailstone.velocities.x,
+            },
+        })
+        .collect();
+
+    'bruteforce: for i in -bruteforce..=bruteforce {
+        for ii in -bruteforce..=bruteforce {
+            let potential = Point2D {
+                x: i as f64,
+                y: ii as f64,
+            };
+
+            for iii in 0..hailstones.len() {
+                for iiii in 0..hailstones.len() {
+                    if let Some(intersection) = translate(&fake_hailstones[iii], potential)
+                        .intersects_at(&translate(&fake_hailstones[iiii], potential))
+                    {
+                        if fake_hailstones.iter().all(|hailstone| {
+                            translate(hailstone, potential).is_point_on_trajectory(intersection)
+                        }) {
+                            z = Some(potential.x as i32);
+
+                            break 'bruteforce;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let first = hailstones.first().unwrap();
+    let second = hailstones.last().unwrap();
+
+    let a = x.unwrap() as i64 - first.velocities.x as i64;
+    let b = x.unwrap() as i64 - second.velocities.x as i64;
+    let c = y.unwrap() as i64 - first.velocities.y as i64;
+    let d = y.unwrap() as i64 - second.velocities.y as i64;
+    let foo = (b * (second.starting_position.y - first.starting_position.y) as i64
+        - (second.starting_position.x - first.starting_position.x) as i64 * d)
+        / (a * d - b * c);
+
+    let stone_vel = Velocity3D {
+        x: x.unwrap() as f64,
+        y: y.unwrap() as f64,
+        z: z.unwrap() as f64,
+    };
+
+    let stone_origin = Point3D {
+        x: first.starting_position.x + (first.velocities.x - stone_vel.x) * foo as f64,
+        y: first.starting_position.y + (first.velocities.y - stone_vel.y) * foo as f64,
+        z: first.starting_position.z + (first.velocities.z - stone_vel.z) * foo as f64,
+    };
+
+    let magic_stone = Hailstone {
+        starting_position: stone_origin,
+        velocities: stone_vel,
+    };
+
+    println!("Magic stone: {:?}", magic_stone);
+
+    stone_origin.x as usize + stone_origin.y as usize + stone_origin.z as usize
 }
 
 fn make_pairs(hailstones: &Vec<Hailstone>) -> Vec<(Hailstone, Hailstone)> {
     let mut pairs = vec![];
 
     for i in 0..hailstones.len() {
-        for ii in i..hailstones.len() {
+        for ii in i + 1..hailstones.len() {
             pairs.push((hailstones[i], hailstones[ii]));
         }
     }
@@ -209,9 +291,9 @@ fn parse(input: &str) -> Vec<Hailstone> {
                     z: z.parse().unwrap(),
                 },
                 velocities: Velocity3D {
-                    x: vel_x.parse::<i32>().unwrap(),
-                    y: vel_y.parse::<i32>().unwrap(),
-                    z: vel_z.parse::<i32>().unwrap(),
+                    x: vel_x.parse::<f64>().unwrap(),
+                    y: vel_y.parse::<f64>().unwrap(),
+                    z: vel_z.parse::<f64>().unwrap(),
                 },
             }
         })
