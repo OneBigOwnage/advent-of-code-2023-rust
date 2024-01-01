@@ -1,3 +1,5 @@
+use std::{collections::HashSet, fmt::Display};
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct Component {
     name: String,
@@ -6,8 +8,28 @@ struct Component {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct Wire {
-    a: Component,
-    b: Component,
+    a: String,
+    b: String,
+}
+
+impl Display for Wire {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} <-> {}", self.a, self.b)
+    }
+}
+
+impl Wire {
+    fn connects(&self, other: &str) -> bool {
+        self.a == other || self.b == other
+    }
+
+    fn other(&self, not: &str) -> String {
+        if self.a == not {
+            return self.b.to_string();
+        } else {
+            return self.a.to_string();
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -18,11 +40,53 @@ struct Apparatus {
 
 impl Apparatus {
     fn group_sizes(&self) -> Vec<usize> {
-        todo!()
+        let total = self.components.len();
+
+        let mut stack = vec![self.components.first().unwrap()];
+        let mut seen: HashSet<String> = HashSet::new();
+
+        while let Some(node) = stack.pop() {
+            let neighbors = self
+                .components
+                .iter()
+                .filter(|comp| node.connected_components.contains(&comp.name))
+                .filter(|comp| !seen.contains(&comp.name))
+                .collect::<Vec<&Component>>();
+
+            for neighbor in &neighbors {
+                seen.insert(neighbor.name.to_owned());
+                stack.push(&neighbor);
+            }
+        }
+
+        if seen.len() == total {
+            return vec![self.components.len()];
+        }
+
+        return vec![seen.len(), total - seen.len()];
+
+        todo!("Counting the groups and their sizes hasn't been implemented yet. Count: {}, total: {}.", seen.len(), total)
     }
 
     fn disconnect(&self, wire: &Wire) -> Apparatus {
-        todo!()
+        let mut components = self.components.clone();
+
+        for component in &mut components {
+            if wire.a == component.name {
+                component
+                    .connected_components
+                    .retain(|comp| comp != &wire.b);
+            } else if wire.b == component.name {
+                component
+                    .connected_components
+                    .retain(|comp| comp != &wire.a);
+            }
+        }
+
+        Apparatus {
+            components,
+            wires: self.wires.iter().filter(|&w| w != wire).cloned().collect(),
+        }
     }
 }
 
@@ -35,17 +99,29 @@ fn main() {
 
 fn part1(input: &str) -> usize {
     let apparatus = parse(input);
+    let wires_len = apparatus.wires.len();
 
-    for i in 0..apparatus.wires.len() {
-        for ii in i..apparatus.wires.len() {
-            for iii in ii..apparatus.wires.len() {
+    println!("Apparatus with {} components and {} wires.", apparatus.components.len(), apparatus.wires.len());
+
+    for i in 0..wires_len {
+        println!("Attempt {i}/{wires_len}");
+        for ii in i..wires_len {
+            for iii in ii..wires_len {
                 let attempt = apparatus
                     .disconnect(&apparatus.wires[i])
                     .disconnect(&apparatus.wires[ii])
                     .disconnect(&apparatus.wires[iii]);
 
                 if attempt.group_sizes().len() > 1 {
-                    return attempt.group_sizes().iter().fold(0, |acc, cur| acc * cur);
+                    println!(
+                        "If we disconnect {}, {} and {}. We end up with {} groups of sizes: {:?}",
+                        &apparatus.wires[i],
+                        &apparatus.wires[ii],
+                        &apparatus.wires[iii],
+                        attempt.group_sizes().len(),
+                        attempt.group_sizes()
+                    );
+                    return attempt.group_sizes().iter().fold(1, |acc, cur| acc * cur);
                 }
             }
         }
@@ -59,7 +135,53 @@ fn part2(input: &str) -> usize {
 }
 
 fn parse(input: &str) -> Apparatus {
-    todo!()
+    let mut components: Vec<Component> = input
+        .lines()
+        .flat_map(|line| {
+            let split = line.split(": ").collect::<Vec<_>>();
+            let split = split.as_slice();
+
+            let mut component_names: Vec<&str> = split[1].split(" ").collect();
+
+            component_names.push(split[0]);
+
+            component_names
+                .iter()
+                .map(|name| Component {
+                    name: name.to_string(),
+                    connected_components: vec![],
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let wires: Vec<Wire> = input
+        .lines()
+        .flat_map(|line| {
+            let split = line.split(": ").collect::<Vec<_>>();
+            let split = split.as_slice();
+
+            split[1]
+                .split(" ")
+                .map(|name| Wire {
+                    a: split[0].to_string(),
+                    b: name.to_string(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    for component in &mut components {
+        component.connected_components = wires
+            .iter()
+            .filter(|wire| wire.connects(&component.name))
+            .map(|wire| wire.other(&component.name))
+            .collect();
+    }
+
+    Apparatus { components, wires }
 }
 
 #[allow(dead_code)]
