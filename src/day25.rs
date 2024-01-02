@@ -1,4 +1,11 @@
-use std::{collections::HashSet, fmt::Display};
+use std::{
+    cmp::Reverse,
+    collections::{HashMap, HashSet},
+    fmt::Display,
+};
+
+use itertools::Itertools;
+use rand::{self, seq::SliceRandom};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct Component {
@@ -6,10 +13,32 @@ struct Component {
     connected_components: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+impl Component {
+    fn connected_as_component(&self, apparatus: &Apparatus) -> Vec<Component> {
+        self.connected_components
+            .iter()
+            .map(|name| apparatus.component(name).unwrap())
+            .cloned()
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialOrd, Ord, Hash)]
 struct Wire {
     a: String,
     b: String,
+}
+
+impl PartialEq for Wire {
+    fn eq(&self, other: &Self) -> bool {
+        (self.a == other.a && self.b == other.b) || (self.a == other.b && self.b == other.a)
+    }
+}
+
+impl PartialEq<(String, String)> for Wire {
+    fn eq(&self, (other_a, other_b): &(String, String)) -> bool {
+        (self.a == *other_a && self.b == *other_b) || (self.a == *other_b && self.b == *other_a)
+    }
 }
 
 impl Display for Wire {
@@ -88,43 +117,226 @@ impl Apparatus {
             wires: self.wires.iter().filter(|&w| w != wire).cloned().collect(),
         }
     }
+
+    fn wires_ordered_by_importance(&self) -> Vec<Wire> {
+        let mut wire_importance: HashMap<(String, String), usize> = self
+            .wires
+            .iter()
+            .map(|wire| ((wire.a.clone(), wire.b.clone()), 0))
+            .into_iter()
+            .collect();
+
+        for i in 0..self.components.len() {
+            // println!("Calculating importance {i}/{}", self.components.len());
+            let start = self.components.get(i).unwrap();
+
+            let mut stack = vec![vec![start.clone()]];
+            let mut seen: HashSet<Component> = HashSet::new();
+
+            while let Some(path) = stack.pop() {
+                for connected in path.last().unwrap().connected_as_component(&self) {
+                    if seen.contains(&connected) {
+                        continue;
+                    }
+
+                    let mut new_path = path.clone();
+
+                    new_path.push(connected.clone());
+
+                    // For each edge (wire) in new_path, add 1 to its importance.
+                    for (i, window) in new_path.windows(2).enumerate() {
+                        if let Some(importance) = wire_importance
+                            .get_mut(&(window[0].name.clone(), window[1].name.clone()))
+                        {
+                            *importance += i;
+                        } else if let Some(importance) = wire_importance
+                            .get_mut(&(window[1].name.clone(), window[0].name.clone()))
+                        {
+                            *importance += i;
+                        }
+                    }
+
+                    stack.push(new_path);
+                    seen.insert(connected.clone());
+                }
+            }
+        }
+
+        let mut vec: Vec<(Wire, usize)> = wire_importance
+            .into_iter()
+            .map(|((a, b), importance)| (Wire { a, b }, importance))
+            .collect();
+
+        vec.sort_by(|a, b| b.1.cmp(&a.1));
+
+        println!(
+            "Top 100 wires and their importance metric:\n{}",
+            vec.iter()
+                .take(100)
+                .fold("".to_owned(), |acc, (wire, importance)| format!(
+                    "{}{} <-> {}. Score: {}\n",
+                    acc, wire.a, wire.b, importance
+                ))
+        );
+
+        vec.into_iter().map(|(wire, _)| wire).collect()
+    }
+
+    fn find_n_cuts(&self, cuts_count: usize) -> usize {
+        let viable_components = self
+            .components
+            .iter()
+            .filter(|comp| comp.connected_components.len() > cuts_count)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let mut potential_wires: HashMap<Wire, usize> = HashMap::new();
+        let mut attempted_cuts: Vec<(Wire, Wire, Wire)> = vec![];
+
+        let mut rng = &mut rand::thread_rng();
+
+        loop {
+            let (start, destination) = viable_components
+                .choose_multiple(&mut rng, 2)
+                .collect_tuple()
+                .expect("We should always have at least two nodes");
+
+            let mut used_wires: HashSet<Wire> = HashSet::new();
+            let mut valid_paths_found = 0;
+
+            'pathfind: for _ in 0..cuts_count + 1 {
+                let mut stack: Vec<Component> = vec![start.to_owned()];
+                let mut visited: HashSet<Component> = HashSet::new();
+
+                while let Some(node) = stack.pop() {
+                    for neighbor in node
+                        .connected_as_component(self)
+                        .iter()
+                        .filter(|comp| {
+                            !used_wires
+                                .iter()
+                                .any(|vis| vis == &(comp.name.clone(), node.name.clone()))
+                        })
+                        .filter(|comp| !visited.contains(comp))
+                        .collect::<Vec<_>>()
+                    {
+                        visited.insert(neighbor.clone());
+                        stack.push(neighbor.clone());
+                        used_wires.insert(Wire {
+                            a: node.name.clone(),
+                            b: neighbor.name.clone(),
+                        });
+
+                        if neighbor == destination {
+                            valid_paths_found += 1;
+                            continue 'pathfind;
+                        }
+                    }
+                }
+
+                break;
+            }
+
+            if valid_paths_found == cuts_count + 1 {
+                continue;
+            }
+
+            for used in &used_wires {
+                *potential_wires.entry(used.clone()).or_insert(0) += 1;
+            }
+
+            let mut pairs: Vec<_> = potential_wires.clone().into_iter().collect();
+
+            // Sort by value in descending order
+            pairs.sort_by_key(|&(_, score)| Reverse(score));
+
+            let mut offset = 0;
+
+            loop {
+                // Select the wires to cut based on the current offset
+                let wires_to_cut = pairs
+                    .iter()
+                    .skip(offset)
+                    .take(cuts_count)
+                    .map(|(key, _)| key.clone())
+                    .collect::<Vec<_>>();
+
+                // Check if this combination of cuts has been attempted
+                if !attempted_cuts.contains(&(
+                    wires_to_cut[0].clone(),
+                    wires_to_cut[1].clone(),
+                    wires_to_cut[2].clone(),
+                )) {
+                    println!("Attempting to cut wires: {:?}.", wires_to_cut);
+
+                    // Reset attempt to a fresh clone for each new try
+                    let mut attempt = self.clone();
+
+                    for wire in &wires_to_cut {
+                        attempt = attempt.disconnect(wire);
+                    }
+
+                    if attempt.group_sizes().len() > 1 {
+                        println!(
+                            "If we disconnect the above wires, we end up with {} groups of sizes: {:?}",
+                            attempt.group_sizes().len(),
+                            attempt.group_sizes()
+                        );
+
+                        return attempt.group_sizes().iter().fold(1, |acc, cur| acc * cur);
+                    }
+
+                    // Add the attempted combination to the list
+                    attempted_cuts.push((
+                        wires_to_cut[0].clone(),
+                        wires_to_cut[1].clone(),
+                        wires_to_cut[2].clone(),
+                    ));
+                }
+
+                // Increase the offset for the next loop iteration
+                offset += 1;
+
+                // Check for loop termination condition (e.g., running out of combinations)
+                if offset + cuts_count > pairs.len() {
+                    break;
+                }
+            }
+        }
+    }
+
+    fn component(&self, name: &str) -> Option<&Component> {
+        self.components.iter().find(|cmp| cmp.name == name)
+    }
 }
 
 fn main() {
     assert_eq!(54, part1(&test_input()));
-    assert_eq!(0, part1(&input()));
-    assert_eq!(0, part2(&test_input()));
-    assert_eq!(0, part2(&input()));
+    // assert_eq!(0, part1(&input()));
+    // assert_eq!(0, part2(&test_input()));
+    // assert_eq!(0, part2(&input()));
 }
 
 fn part1(input: &str) -> usize {
     let apparatus = parse(input);
-    let wires_len = apparatus.wires.len();
 
-    println!("Apparatus with {} components and {} wires.", apparatus.components.len(), apparatus.wires.len());
+    let wires = apparatus.wires_ordered_by_importance();
 
-    for i in 0..wires_len {
-        println!("Attempt {i}/{wires_len}");
-        for ii in i..wires_len {
-            for iii in ii..wires_len {
-                let attempt = apparatus
-                    .disconnect(&apparatus.wires[i])
-                    .disconnect(&apparatus.wires[ii])
-                    .disconnect(&apparatus.wires[iii]);
+    let attempt = apparatus
+        .disconnect(&wires[0])
+        .disconnect(&wires[1])
+        .disconnect(&wires[2]);
 
-                if attempt.group_sizes().len() > 1 {
-                    println!(
-                        "If we disconnect {}, {} and {}. We end up with {} groups of sizes: {:?}",
-                        &apparatus.wires[i],
-                        &apparatus.wires[ii],
-                        &apparatus.wires[iii],
-                        attempt.group_sizes().len(),
-                        attempt.group_sizes()
-                    );
-                    return attempt.group_sizes().iter().fold(1, |acc, cur| acc * cur);
-                }
-            }
-        }
+    if attempt.group_sizes().len() > 1 {
+        println!(
+            "If we disconnect {}, {} and {}. We end up with {} groups of sizes: {:?}",
+            &wires[0],
+            &wires[1],
+            &wires[2],
+            attempt.group_sizes().len(),
+            attempt.group_sizes()
+        );
+        return attempt.group_sizes().iter().fold(1, |acc, cur| acc * cur);
     }
 
     panic!("No solution found");
@@ -180,6 +392,14 @@ fn parse(input: &str) -> Apparatus {
             .map(|wire| wire.other(&component.name))
             .collect();
     }
+
+    components
+        .iter()
+        .find(|comp| comp.name.len() != 3)
+        .and_then(|comp| {
+            println!("Found something weird: {}", comp.name);
+            None::<usize>
+        });
 
     Apparatus { components, wires }
 }
