@@ -1,17 +1,58 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
-#[derive(Debug)]
+use itertools::Itertools;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum SpringCondition {
+    Operational,
+    Damaged,
+    Unknown,
+}
+
+impl Display for SpringCondition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                SpringCondition::Operational => ".",
+                SpringCondition::Damaged => "#",
+                SpringCondition::Unknown => "?",
+            }
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct ConditionRecord {
-    springs: String,
+    springs: Vec<SpringCondition>,
     damaged_spring_groups: Vec<usize>,
     arrangements: Option<Vec<String>>,
+}
+
+impl Display for ConditionRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} {}",
+            self.springs
+                .iter()
+                .map(|condition| match condition {
+                    SpringCondition::Operational => '.',
+                    SpringCondition::Damaged => '#',
+                    SpringCondition::Unknown => '?',
+                })
+                .fold("".to_owned(), |acc, cur| acc + &cur.to_string()),
+            self.damaged_spring_groups.iter().join(",")
+        )
+    }
 }
 
 fn main() {
     assert_eq!(21, part1(&test_input()));
     assert_eq!(7622, part1(&input()));
-    // assert_eq!(0, part2(&test_input()));
-    // assert_eq!(0, part2(&input()));
+    assert_eq!(525_152, part2(&test_input()));
+    assert_eq!(0, part2(&input()));
 }
 
 fn part1(input: &String) -> usize {
@@ -20,16 +61,11 @@ fn part1(input: &String) -> usize {
     records
         .iter_mut()
         .map(|record| {
-            println!(
-                "Going to find arrangements for ({}\t{:?})",
-                record.springs, record.damaged_spring_groups
-            );
+            println!("Going to find arrangements for {record}");
             set_arrangements(record);
             println!(
-                "\t-> we found {} possible arrangements for ({}\t{:?})",
+                "\t-> we found {} possible arrangements for {record}",
                 record.arrangements.clone().expect("We just set them").len(),
-                record.springs,
-                record.damaged_spring_groups,
             );
 
             record.arrangements.clone().unwrap().len()
@@ -38,7 +74,22 @@ fn part1(input: &String) -> usize {
 }
 
 fn part2(input: &String) -> usize {
-    todo!();
+    let mut records = parse_records(input);
+
+    records
+        .iter_mut()
+        .map(|record| &mut expand_record(record, 3))
+        .map(|record| {
+            println!("Going to find arrangements for {record}");
+            set_arrangements(record);
+            println!(
+                "\t-> we found {} possible arrangements for {record}",
+                record.arrangements.expect("We just set them").len(),
+            );
+
+            record.arrangements.unwrap().len()
+        })
+        .sum()
 }
 
 fn parse_records(input: &str) -> Vec<ConditionRecord> {
@@ -48,7 +99,16 @@ fn parse_records(input: &str) -> Vec<ConditionRecord> {
             let mut split = line.split_whitespace();
 
             ConditionRecord {
-                springs: split.next().unwrap().to_string(),
+                springs: split
+                    .next()
+                    .unwrap()
+                    .chars()
+                    .map(|ch| match ch {
+                        '.' => SpringCondition::Operational,
+                        '#' => SpringCondition::Damaged,
+                        '?' => SpringCondition::Unknown,
+                    })
+                    .collect(),
                 damaged_spring_groups: split
                     .next()
                     .unwrap()
@@ -61,22 +121,43 @@ fn parse_records(input: &str) -> Vec<ConditionRecord> {
         .collect()
 }
 
+fn expand_record(record: &mut ConditionRecord, times: usize) -> ConditionRecord {
+    let mut expanded = vec![];
+
+    for i in 0..times - 1 {
+        expanded.extend(record.springs);
+        expanded.push(SpringCondition::Unknown);
+    }
+
+    expanded.extend(record.springs);
+
+    ConditionRecord {
+        springs: expanded,
+        damaged_spring_groups: record.damaged_spring_groups,
+        arrangements: record.arrangements,
+    }
+}
+
 fn set_arrangements(record: &mut ConditionRecord) -> &mut ConditionRecord {
     let swappables: Vec<usize> = record
         .springs
-        .chars()
+        .iter()
         .enumerate()
-        .filter(|(_, ch)| *ch == '?')
+        .filter(|(_, condition)| **condition == SpringCondition::Unknown)
         .map(|(i, _)| i)
         .collect();
 
     let string = fill_out_potential_spring_arrangement(
         &record.springs,
         record.damaged_spring_groups.iter().sum::<usize>()
-            - record.springs.chars().filter(|ch| *ch == '#').count(),
+            - record
+                .springs
+                .iter()
+                .filter(|&condition| condition == &SpringCondition::Damaged)
+                .count(),
     );
 
-    let mut memo: HashMap<(String, usize), Vec<String>> = HashMap::new();
+    let mut memo: HashMap<(SpringCondition, usize), Vec<SpringCondition>> = HashMap::new();
     record.arrangements = Some(
         recursively_find_arrangements(&string, &swappables, 0, &mut memo)
             .into_iter()
@@ -87,30 +168,33 @@ fn set_arrangements(record: &mut ConditionRecord) -> &mut ConditionRecord {
     record
 }
 
-fn fill_out_potential_spring_arrangement(springs: &str, broken_count: usize) -> String {
-    let mut parts = springs.chars().collect::<Vec<_>>();
+fn fill_out_potential_spring_arrangement(
+    springs: &Vec<SpringCondition>,
+    broken_count: usize,
+) -> Vec<SpringCondition> {
+    let mut parts = springs.clone();
     let mut todo_broken = broken_count;
 
     for i in 0..springs.len() {
-        if parts[i] == '?' {
+        if parts[i] == SpringCondition::Unknown {
             if todo_broken > 0 {
-                parts[i] = '#';
+                parts[i] = SpringCondition::Damaged;
                 todo_broken -= 1;
             } else {
-                parts[i] = '.';
+                parts[i] = SpringCondition::Operational;
             }
         }
     }
 
-    parts.iter().collect()
+    parts.into_iter().collect()
 }
 
 fn recursively_find_arrangements(
-    springs: &str,
+    springs: &Vec<SpringCondition>,
     swappables: &Vec<usize>,
     index: usize,
-    memo: &mut HashMap<(String, usize), Vec<String>>,
-) -> Vec<String> {
+    memo: &mut HashMap<(SpringCondition, usize), Vec<String>>,
+) -> Vec<SpringCondition> {
     let mut chars: Vec<_> = springs.chars().collect();
 
     let mut permutations = vec![];
@@ -157,9 +241,9 @@ fn recursively_find_arrangements(
     permutations
 }
 
-fn is_arrangement_possible(record: &ConditionRecord, arrangement: &str) -> bool {
+fn is_arrangement_possible(record: &ConditionRecord, arrangement: &Vec<SpringCondition>) -> bool {
     arrangement
-        .split(".")
+        .split(SpringCondition::Operational)
         .filter(|s| !s.is_empty())
         .map(|s| s.len())
         .collect::<Vec<_>>()
