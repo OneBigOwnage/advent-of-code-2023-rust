@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     fmt::Display,
 };
 
@@ -79,48 +79,24 @@ impl ConditionRecord {
                 arrangement.push_front(SpringCondition::Operational);
             }
 
-            // When we have something like ".......#.#.###", we want to know the indices of where
-            // the damaged groups start:           ^ ^ ^
-
-            // let mut indices: Vec<GroupPointer> = vec![GroupPointer {
-            //     start: num_operational_to_insert,
-            //     len: self.damaged_spring_groups[0],
-            // }];
-            //
-            // for (i, len) in self.damaged_spring_groups.iter().enumerate().skip(1) {
-            //     let prev = &indices[i - 1];
-            //     indices.push(GroupPointer {
-            //         start: prev.start + prev.len + 1,
-            //         len: *len,
-            //     });
-            // }
-            //
-            // When we have something like ".......#.#.###", we want to know the indices of where
-            // the operational groups start:^       ^ ^
-            // We also want to know their length.
+            // When we have something like this: ".......#.#.###", we want to know the indices of where
+            // the operational groups start:      ^       ^ ^
+            // We also want to know their length. 7       1 1
             let indices =
                 group_conditions(&arrangement.clone().into(), SpringCondition::Operational);
 
             (arrangement.into(), indices)
         };
 
-        // 2. Recursively shrink & enlarge the gaps between groups;
-        let mut potential_arrangements = HashSet::new();
-
-        recursively_make_potential_arrangements(
+        // 2. Using this information, we can now recursively shrink & enlarge the gaps between groups,
+        //    every iteration we use the original spring configuration as a mask and check if it's
+        //    valid. We count the valid configurations.
+        recursively_count_potential_arrangements(
             self,
             initial_arrangement.0.clone(),
             initial_arrangement.1.clone(),
             0,
-            &mut potential_arrangements,
-        );
-
-        // 3. Check if a recursively found potential arrangement satisfies the record;
-        // 4. Return a count of the arrangements that did fit;
-        potential_arrangements
-            .iter()
-            .filter(|arrangement| self.does_arrangement_satisfy_constraints(arrangement, None))
-            .count()
+        )
     }
 
     fn does_arrangement_satisfy_constraints(
@@ -159,13 +135,87 @@ impl ConditionRecord {
             damaged_spring_groups,
         }
     }
+
+    fn efficiently_count_possible_arrangements(
+        &self,
+        index_in_record: usize,
+        current_group_index: usize,
+        broken_springs_generated_in_current_group: usize,
+        cache: &mut HashMap<usize, usize>,
+    ) -> usize {
+        // Recursion base case
+        if index_in_record == self.springs.len() - 1 {
+            if current_group_index != self.damaged_spring_groups.len() - 1 {
+                return 0;
+            } else if self.springs[index_in_record] == SpringCondition::Operational {
+                return 1;
+            } else if self.springs[index_in_record] == SpringCondition::Damaged
+                && broken_springs_generated_in_current_group - 1
+                    == self.damaged_spring_groups[current_group_index]
+            {
+                return 1;
+            }
+        }
+
+        match self.springs[index_in_record] {
+            SpringCondition::Operational => self.efficiently_count_possible_arrangements(
+                index_in_record + 1,
+                current_group_index,
+                0,
+                cache,
+            ),
+            SpringCondition::Damaged => match broken_springs_generated_in_current_group {
+                0 => self.efficiently_count_possible_arrangements(
+                    index_in_record + 1,
+                    current_group_index + 1,
+                    0,
+                    cache,
+                ),
+                // TODO: When we're "done" with a damaged group, check if it aligns with our needs. If
+                // it does, add/return 1, if it doesn't, add/return 0.
+                other => self.efficiently_count_possible_arrangements(
+                    index_in_record + 1,
+                    current_group_index,
+                    other + 1,
+                    cache,
+                ),
+            },
+            SpringCondition::Unknown => {
+                // Treat ? as .
+                self.efficiently_count_possible_arrangements(
+                    index_in_record + 1,
+                    current_group_index,
+                    0,
+                    cache,
+                )
+                // Treat ? as #
+                // TODO: When we're "done" with a damaged group, check if it aligns with our needs. If
+                // it does, add/return 1, if it doesn't, add/return 0.
+                + match broken_springs_generated_in_current_group {
+                    0 => self.efficiently_count_possible_arrangements(
+                        index_in_record + 1,
+                        current_group_index + 1,
+                        0,
+                        cache,
+                    ),
+                    other => self.efficiently_count_possible_arrangements(
+                        index_in_record + 1,
+                        current_group_index,
+                        other + 1,
+                        cache,
+                    ),
+                }
+            }
+        }
+    }
 }
 
 fn main() {
-    // assert_eq!(21, part1(&test_input()));
-    // assert_eq!(7622, part1(&input()));
-    // assert_eq!(525_152, part2(&test_input()));
-    assert_eq!(0, part2(&input()));
+    assert_eq!(21, part1(&test_input()));
+    assert_eq!(7622, part1(&input()));
+
+    assert_eq!(525_152, part2(&test_input()));
+    // assert_eq!(0, part2(&input()));
 }
 
 #[allow(dead_code)]
@@ -181,45 +231,9 @@ fn part2(input: &String) -> usize {
     parse_records(input)
         .iter()
         .map(|record| {
-            let ret = record.expand(5).count_possible_arrangements();
-            println!("Found result '{ret}' for {}", record.expand(5));
-            return ret;
-            // Mathematical way
-            let original = record.count_possible_arrangements();
-            let expanded_once = record.expand(2).count_possible_arrangements();
-            let math_answer = original * (expanded_once / original).pow(4);
-
-            // Brute forcing our way to the answer, but this is expensive
-            let brute_force_answer = record.expand(5).count_possible_arrangements();
-
-            if math_answer != brute_force_answer {
-                let expanded_twice = record.expand(3).count_possible_arrangements();
-                let expanded_thrice = record.expand(4).count_possible_arrangements();
-                println!("{math_answer} != {brute_force_answer}");
-
-                println!(
-                    "1: Original number of arrangements: {original}\n\
-                    2: Known number of arrangements: {expanded_once}. {expanded_once} / {original} = {}.\n\
-                    3: Known number of arrangements: {expanded_twice}. {expanded_twice} / {expanded_once} = {}. {expanded_twice} / {original} = {}.\n\
-                    4: Known number of arrangements: {expanded_thrice}. {expanded_thrice} / {expanded_twice} = {}. {expanded_thrice} / {expanded_once} = {}. {expanded_thrice} / {original} = {}.\n\
-                    5: Known number of arrangements: {brute_force_answer}. {brute_force_answer} / {expanded_thrice} = {}. {brute_force_answer} / {expanded_twice} = {}. {brute_force_answer} / {expanded_once} = {}. {brute_force_answer} / {original} = {}.\n",
-                    expanded_once / original,
-
-                    expanded_twice / expanded_once,
-                    expanded_twice / original,
-
-                    expanded_thrice / expanded_twice,
-                    expanded_thrice / expanded_once,
-                    expanded_thrice / original,
-
-                    brute_force_answer / expanded_thrice,
-                    brute_force_answer / expanded_twice,
-                    brute_force_answer / expanded_once,
-                    brute_force_answer / original,
-                );
-            }
-
-            math_answer
+            record
+                .expand(5)
+                .efficiently_count_possible_arrangements(0, 0, 0, &mut HashMap::new())
         })
         .sum()
 }
@@ -299,18 +313,21 @@ fn group_conditions(
     result
 }
 
-fn recursively_make_potential_arrangements(
+fn recursively_count_potential_arrangements(
     record: &ConditionRecord,
     mut arrangement: Vec<SpringCondition>,
     mut idx_pointers: Vec<GroupPointer>,
     index: usize,
-    results: &mut HashSet<Vec<SpringCondition>>,
-) {
+) -> usize {
     if index == idx_pointers.len() - 1 {
-        return;
+        return 0;
     }
 
-    results.insert(arrangement.clone());
+    let mut count = 0;
+
+    if index == 0 && record.does_arrangement_satisfy_constraints(&arrangement, None) {
+        count = 1;
+    }
 
     let max = match (idx_pointers[index].start, index) {
         (0, 0) => idx_pointers[index].len,
@@ -325,25 +342,24 @@ fn recursively_make_potential_arrangements(
         idx_pointers[index + 1].len += 1;
         idx_pointers[index + 1].start -= 1;
 
-        if results.contains(&arrangement) {
-            continue;
+        if record.does_arrangement_satisfy_constraints(&arrangement, None) {
+            count += 1;
         }
-
-        results.insert(arrangement.clone());
 
         // Only go to check recursively if there's even any hope of finding something useful.
         if record
             .does_arrangement_satisfy_constraints(&arrangement, Some(idx_pointers[index].start))
         {
-            recursively_make_potential_arrangements(
+            count += recursively_count_potential_arrangements(
                 record,
                 arrangement.clone(),
                 idx_pointers.clone(),
                 index + 1,
-                results,
             );
         }
     }
+
+    count
 }
 
 fn test_input() -> String {
